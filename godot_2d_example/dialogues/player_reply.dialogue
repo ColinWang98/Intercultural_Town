@@ -1,0 +1,3 @@
+~ start
+{{ GameState.last_player_message }}
+=> END
