@@ -210,7 +210,7 @@ async def _run_chat_round(conversation_id: str, persona_ids: list[str], user_con
             if history_text:
                 group_context += "下面是对话记录，请在该上下文中继续对话：\n"
                 group_context += history_text + "\n\n"
-            group_context += f"你是 {persona_name}，请以你的角色身份参与对话。"
+            group_context += f"你是 {persona_name}，请以你的角色身份参与对话。【协作规则】如果你不确定答案或需要他人意见，可以使用 ask_agent 工具询问其他角色。"
             user_msg = group_context
         else:
             user_msg = user_content
@@ -221,6 +221,15 @@ async def _run_chat_round(conversation_id: str, persona_ids: list[str], user_con
             user_id=USER_ID, session_id=session_id, new_message=new_message
         ):
             events.append(evt)
+            
+            # Log tool call events
+            if hasattr(evt, 'content') and evt.content:
+                if hasattr(evt.content, 'parts'):
+                    for part in evt.content.parts or []:
+                        if hasattr(part, 'function_call'):
+                            print(f"[TOOL CALL] {persona_name} -> {part.function_call.name}({part.function_call.args})")
+                        elif hasattr(part, 'function_response'):
+                            print(f"[TOOL RESULT] {persona_name} <- {part.function_response.response}")
         ai_reply = _get_reply_from_events(events)
         if ai_reply:
             replies.append(f"[{persona_name}] {ai_reply}")
