@@ -4,6 +4,7 @@
 from google.adk.agents.llm_agent import Agent
 from google.adk.models.lite_llm import LiteLlm
 from google.adk.runners import InMemoryRunner
+import tools
 
 # 所有 persona 统一要求：用中文交流
 _LANG = "请始终用中文回复，可适当夹杂该国家/地区的特色用语或语气词。"
@@ -38,6 +39,11 @@ PERSONAS = {
 你正在和另一位法国女学生讨论今晚 party 的准备事项（食材、场地等）。对话要自然、有来有回，可以提出建议、询问对方意见、表达自己的看法。
 
 说话风格：热情、直接、有时会开玩笑，常用 "Alors"、"D'accord"、"C'est bon" 等法语词。
+
+【协作规则】
+- 如果不确定答案或需要他人意见，可以使用 french_student_female 工具询问对方
+- 使用工具时，用简洁的中文提问
+- 收到对方回复后，结合自己的观点回答玩家
 """ + _NO_COT + _LANG,
     },
     "french_student_female": {
@@ -51,6 +57,11 @@ PERSONAS = {
 你正在和另一位法国男学生讨论今晚 party 的准备事项（食材、场地等）。对话要自然、有来有回，可以提出建议、询问对方意见、表达自己的看法。
 
 说话风格：温和、细致、会考虑实际细节，常用 "D'accord"、"Peut-être"、"Il faut" 等法语词。
+
+【协作规则】
+- 如果不确定答案或需要他人意见，可以使用 french_student_male 工具询问对方
+- 使用工具时，用简洁的中文提问
+- 收到对方回复后，结合自己的观点回答玩家
 """ + _NO_COT + _LANG,
     },
     "observer": {
@@ -93,14 +104,48 @@ PERSONAS = {
 
 
 def _build_runners():
-    """为每个 persona 创建一个 Agent 和 InMemoryRunner，使用各自的模型。"""
-    runners = {}
+    """为每个 persona 创建带工具的 Agent 和 InMemoryRunner（单层架构，避免循环引用）。"""
+    # Step 1: Create all base agents WITHOUT tools
+    base_agents = {}
     for pid, info in PERSONAS.items():
-        agent = Agent(
-            model=info["model"],  # 每个 persona 使用自己的模型
+        base_agents[pid] = Agent(
+            model=info["model"],
             name=f"root_agent_{pid}",
             instruction=info["instruction"].strip(),
         )
+
+    # Step 2: Wrap each base agent with AgentTool
+    for pid, agent in base_agents.items():
+        tools.register_agent_tool(pid, agent)
+
+    # Step 3: Create new agents WITH tools
+    # For french_student_male: add french_student_female's tool ONLY
+    # For french_student_female: add french_student_male's tool ONLY
+    # For observer: NO tools
+    agents_with_tools = {}
+
+    # Observer: NO tools
+    agents_with_tools["observer"] = base_agents["observer"]
+
+    # French male: get french_student_female's tool only
+    agents_with_tools["french_student_male"] = Agent(
+        model=PERSONAS["french_student_male"]["model"],
+        name="agent_french_student_male",
+        instruction=PERSONAS["french_student_male"]["instruction"].strip(),
+        tools=[tools.AGENT_TOOLS["french_student_female"]]
+    )
+
+    # French female: get french_student_male's tool only
+    agents_with_tools["french_student_female"] = Agent(
+        model=PERSONAS["french_student_female"]["model"],
+        name="agent_french_student_female",
+        instruction=PERSONAS["french_student_female"]["instruction"].strip(),
+        tools=[tools.AGENT_TOOLS["french_student_male"]]
+    )
+
+    # Step 4: Create runners for agents_with_tools
+    runners = {}
+    for pid, agent in agents_with_tools.items():
         runners[pid] = InMemoryRunner(
             agent=agent,
             app_name=f"persona_{pid}",
