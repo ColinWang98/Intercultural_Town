@@ -8,7 +8,7 @@
 ## 1. 整体架构
 
 - **后端**：`FastAPI + Google ADK + LiteLlm + Ollama`
-  - 提供 REST API：`/personas`、`/chat`、`/chat/start_group`
+  - 提供 REST API：`GET /personas`、`POST/GET /conversations`、`GET/POST /conversations/{id}/messages`
   - 每个 persona 独立一个 ADK Agent + Runner + Session
 - **前端**：`Godot 4 2D`
   - 使用 `HTTPRequest` 调用 FastAPI 接口
@@ -76,47 +76,23 @@
 - `_get_or_create_session(runner, app_name, session_id)`：
   - 若 session 不存在则创建，否则直接读取。
 
-暴露的 API：
+暴露的 API（REST）：
 
 - `GET /personas`
   - 返回形如 `[{ "id": "french_student_male", "name": "法国学生（男）" }, ...]`
   - 前端可用于下拉选择或按钮展示。
 
-- `POST /chat`
-  - 请求体 `ChatReq`：
-    - `user_input: str`
-    - `persona: str | list[str]`（单人或群聊）
-  - 处理流程：
-    1. 将 `persona` 正规化：
-       - 若是数组：`strip().lower()` 后过滤空字符串，若为空则使用 `DEFAULT_PERSONA`。
-       - 若是字符串：`(req.persona or "").strip().lower()`，为空则用默认。
-    2. 校验 persona 是否存在于 `personas.PERSONAS`，不存在则返回错误提示。
-    3. **多人（群聊）**：
-       - 遍历 persona_ids：
-         - 为每个 persona 取对应 `RUNNER` 与 session。
-         - 构造群聊上下文：当前参与的角色名列表 + 自己的 persona 名。
-         - prompt 形如：  
-           `【群聊模式】现在有 N 位角色在对话：A, B, ...。你是 X，... 玩家说：{user_input}`
-         - 调用 `runner.run_async(...)` 获取每个角色的回复。
-         - 每条回复包装为 `[角色显示名] 内容`。
-       - 最终用 `\n\n` 拼接所有回复返回。
-    4. **单人**：
-       - 对目标 persona 的 Runner 直接发送 `user_input`，获取单条回复返回。
+- `POST /conversations`
+  - 请求体：`{"persona_ids": ["french_student_male"]}` 或多人 id 列表。
+  - 创建新会话，返回 `ConversationItem`（含 `id`、`persona_ids`、`messages`、`created_at`）。
+  - 若 `persona_ids` 为两人及以上（群聊），后端自动生成开场消息并写入 `messages`（两位法国学生时按 party 准备场景互相对话）。
 
-- `POST /chat/start_group`
-  - 用于**群聊开场**，在玩家刚刚进入“多人范围”时由前端触发。
-  - 请求体 `StartGroupChatReq`：
-    - `persona_ids: list[str]`
-  - 逻辑：
-    1. 少于 2 个 persona 则返回错误。
-    2. 校验 persona 是否存在。
-    3. 特判 **两个法国学生**：
-       - 构造法语场景提示 `initial_prompt_fr`（讨论 party 准备的内容）。
-       - 先给男学生发送场景提示，得到初始发言 A。
-       - 再把 A 作为“对方说：A”拼入给女学生的 prompt，引导她接话。
-    4. 其他任意组合：
-       - 对每个 persona 发送群聊开场 context（说明参与者是谁，让其以自身角色身份开始对话）。
-    5. 将所有开场发言按 `[角色名] 回复` 拼接成一个字符串返回。
+- `GET /conversations`、`GET /conversations/{id}`、`GET /conversations/{id}/messages`
+  - 列会话摘要、取单会话详情、取会话消息（支持 `limit`、`offset`）。
+
+- `POST /conversations/{id}/messages`
+  - 请求体：`{"content": "你好"}`。
+  - 在指定会话中追加用户消息，调用各 persona 的 Runner 生成回复并追加到会话；返回本轮新增的 `messages` 及合并后的 `reply`。
 
 ---
 
@@ -151,7 +127,7 @@
   - 键：`persona_id`
   - 值：`persona_name`
 - `group_chat_started: bool`
-  - 是否已经触发过**本轮群聊的开场**（防止重复调用 `/chat/start_group`）。
+  - 是否已经触发过**本轮群聊的开场**（防止重复创建会话或重复请求开场）。
 - `last_ai_reply: String`
   - 最近一条 AI 回复内容，给 Dialogue Manager 的 `.dialogue` 使用（`{{ GameState.last_ai_reply }}`）。
 - `last_player_message: String`
@@ -199,7 +175,7 @@
      - 读取 `GameState.group_chat_started`，若是 **false**：
        - 设为 `true`
        - 获取 `nearby_ids = GameState.get_nearby_persona_ids()`
-       - 调用 `_try_start_group_chat(nearby_ids)` → 后端 `/chat/start_group`
+       - 调用 `_try_start_group_chat(nearby_ids)` → 后端 `POST /conversations`（创建会话并拿到含开场的 messages）
        - `return`，不再播普通 intro_dialogue，直接以群聊开场代替
   3. 若仍是单人模式：调用 `_try_show_intro_balloon()` 播招呼。
 
@@ -208,11 +184,8 @@
   - 是否重置 `group_chat_started` 交由 `GameState._update_current_persona()` 统一处理。
 
 - `_try_start_group_chat(persona_ids)`：
-  - 创建一个临时 `HTTPRequest` 节点。
-  - POST `{"persona_ids": persona_ids}` 到 `http://127.0.0.1:8000/chat/start_group`。
-  - 收到 `{ "reply": "..." }` 后：
-    - 写入 `GameState.last_ai_reply`。
-    - 若有 `DialogueManager` 且存在可用的 `npc_reply.dialogue`，用气泡展示这段群聊开场。
+  - 创建临时 `HTTPRequest`，POST `{"persona_ids": persona_ids}` 到 `http://127.0.0.1:8000/conversations`。
+  - 收到会话响应（含 `id`、`messages`）后：将 `id` 存到 `GameState`，若有开场 `messages` 则取最后一条或合并为 `last_ai_reply`，并用 Dialogue Manager 气泡展示。
 
 ### 3.4 聊天 UI（`chat_interface_group.gd`）
 
@@ -245,16 +218,13 @@
   - 尝试用 `player_reply_dialogue` + Dialogue Manager 气泡显示；必要时回退写入 `ChatDisplay`。
   - 调用 `_send_to_backend(message)` 发起 HTTP 请求。
 
-- `_send_to_backend(message)`：
-  - 通过 `GameState.get_nearby_persona_ids()` 获取当前范围内 persona IDs。
-  - 构造 `persona` 字段：
-    - 若 `persona_ids.size() > 1`：用数组（群聊）。
-    - 若 `persona_ids.size() == 1`：用单个字符串。
-    - 若为 0：回退 `_get_active_persona_id()`（极端兜底）。
-  - 发送到 `POST http://127.0.0.1:8000/chat`。
+- `_send_to_backend(message)`（REST 流程）：
+  - 若当前无 `GameState.current_conversation_id`：先 `POST /conversations`（body: `{"persona_ids": [...]}`，从 `GameState.get_nearby_persona_ids()` 或当前单人 id 取得），拿到 `id` 后存到 GameState，再 `POST /conversations/{id}/messages`（body: `{"content": message}`）。
+  - 若已有 `current_conversation_id`：直接 `POST /conversations/{id}/messages`（body: `{"content": message}`）。
+  - 请求地址：`http://127.0.0.1:8000/conversations`、`http://127.0.0.1:8000/conversations/{id}/messages`。
 
 - 处理回复：
-  - 解析 JSON，若含 `"reply"`：
+  - 解析 JSON，若含 `"reply"`（或新消息列表）：
     - 写入 `GameState.last_ai_reply` 并尝试气泡显示。
     - 若未设置“仅气泡”或气泡失败，则在 `ChatDisplay` 中展示蓝色“回复”行。
 
@@ -281,7 +251,7 @@
 3. **实际体验**
    - 玩家靠近某个 NPC → 屏幕上显示当前对话对象，输入框可发送消息，与该 persona 对话。
    - 玩家同时进入两个或更多 NPC 的范围 → `GameState` 切换为群聊模式：
-     - 自动调用 `/chat/start_group` 生成开场对话（两位法国学生会按 party 场景自动对话）。
+     - 首次发消息前会先 `POST /conversations` 创建会话，响应中已包含开场消息（两位法国学生时按 party 场景自动对话）。
      - 后续玩家发送的消息会同时发给所有范围内的 persona，每个都会单独回复，前端以 `[角色名] 回复` 的形式合并显示。
 
 ---

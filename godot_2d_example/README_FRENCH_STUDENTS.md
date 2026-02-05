@@ -33,7 +33,7 @@
    - Player 再靠近 Agent2（或同时进入两个范围）→ 自动切换为群聊模式
 
 2. **自动触发初始对话**：
-   - 检测到两个法国学生都在范围内 → 自动调用 `/chat/start_group`
+   - 检测到两个法国学生都在范围内 → 自动调用 `POST /conversations` 创建会话（响应中含开场消息）
    - 后端会给两个 agent 一段法语提示（关于 party 准备），让他们开始讨论
    - 两个 agent 会各回复一轮，显示为：
      ```
@@ -56,7 +56,7 @@
 - `french_student_female`：使用 `dolphin3:8b` 模型
 - 两个 agent 的 instruction 都包含“讨论 party 准备”的上下文
 
-`Main.py` 已添加 `/chat/start_group` 端点：
+后端通过 `POST /conversations` 创建会话时，若为两人及以上会生成开场消息；Godot 端在群聊首次进入时调用该接口即可：
 - 检测到是两个法国学生时，会给法语初始提示
 - 让两个 agent 开始对话，返回第一轮回复
 

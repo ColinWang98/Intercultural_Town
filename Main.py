@@ -28,8 +28,6 @@ def root():
             "GET /conversations/{id}",
             "GET /conversations/{id}/messages",
             "POST /conversations/{id}/messages",
-            "POST /chat (deprecated, use REST)",
-            "POST /chat/start_group (deprecated, use POST /conversations)",
         ],
     }
 
@@ -39,15 +37,6 @@ def favicon():
     """避免浏览器请求 favicon 时 404。"""
     from fastapi.responses import Response
     return Response(status_code=204)
-
-
-class ChatReq(BaseModel):
-    user_input: str
-    persona: str | list[str] = DEFAULT_PERSONA  # 聊天对象 id（单个）或 id 列表（多人对话）
-
-
-class StartGroupChatReq(BaseModel):
-    persona_ids: list[str]  # 要开始群聊的 persona id 列表
 
 
 class PersonaItem(BaseModel):
@@ -90,11 +79,6 @@ CONVERSATIONS: dict[str, dict] = {}
 
 # 单次回复最大字符数，避免超长/重复导致 Godot 不显示或卡顿
 MAX_REPLY_LENGTH = 2000
-
-
-def _group_id_from_personas(persona_ids: list[str]) -> str:
-    """根据一组 persona id 生成稳定的群聊 id（顺序无关）。"""
-    return "group:" + "+".join(sorted(persona_ids))
 
 
 def _format_conversation_history(messages: list[dict]) -> str:
@@ -422,52 +406,6 @@ async def post_conversation_message(conversation_id: str, req: PostMessageReq):
         "messages": [MessageItem(role=m["role"], name=m.get("name"), content=m["content"]) for m in new_msgs],
         "reply": combined,
     }
-
-
-@app.post("/chat")
-async def chat(req: ChatReq):
-    """兼容旧版 Godot：使用 default 会话，行为与之前一致。建议改用 POST /conversations 与 POST /conversations/{id}/messages。"""
-    try:
-        if isinstance(req.persona, list):
-            persona_ids = [p.strip().lower() for p in req.persona if p.strip()]
-            if not persona_ids:
-                persona_ids = [DEFAULT_PERSONA]
-        else:
-            persona_ids = [(req.persona or "").strip().lower() or DEFAULT_PERSONA]
-        invalid = [p for p in persona_ids if p not in personas.PERSONAS]
-        if invalid:
-            return {"reply": f"未知的聊天对象: {', '.join(invalid)}，可用: {', '.join(personas.PERSONAS)}。"}
-        conv_id = "default_" + _group_id_from_personas(persona_ids)
-        if conv_id not in CONVERSATIONS:
-            now = datetime.now(timezone.utc).isoformat()
-            CONVERSATIONS[conv_id] = {"persona_ids": persona_ids, "messages": [], "created_at": now}
-        combined = await _run_chat_round(conv_id, persona_ids, req.user_input)
-        return {"reply": combined}
-    except Exception as e:
-        print(f"!!! 后端错误: {e}")
-        return {"reply": "抱歉，我这边有点走神了，稍后再试吧。"}
-
-
-@app.post("/chat/start_group")
-async def start_group_chat(req: StartGroupChatReq):
-    """兼容旧版 Godot：创建 default 群聊会话并生成开场对话。建议改用 POST /conversations。"""
-    try:
-        persona_ids = [p.strip().lower() for p in req.persona_ids if p.strip()]
-        if len(persona_ids) < 2:
-            return {"reply": "群聊需要至少两个 agent。"}
-        invalid = [p for p in persona_ids if p not in personas.PERSONAS]
-        if invalid:
-            return {"reply": f"未知的聊天对象: {', '.join(invalid)}，可用: {', '.join(personas.PERSONAS)}。"}
-        conv_id = "default_" + _group_id_from_personas(persona_ids)
-        now = datetime.now(timezone.utc).isoformat()
-        CONVERSATIONS[conv_id] = {"persona_ids": persona_ids, "messages": [], "created_at": now}
-        initial = await _generate_group_initial_messages(persona_ids, conv_id)
-        CONVERSATIONS[conv_id]["messages"] = initial
-        combined = "\n\n".join(m["content"] for m in initial) if initial else "（大家都没想出要说啥）"
-        return {"reply": combined}
-    except Exception as e:
-        print(f"!!! 后端错误（start_group）: {e}")
-        return {"reply": "抱歉，启动群聊时出错了。"}
 
 
 if __name__ == "__main__":
