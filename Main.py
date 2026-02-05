@@ -11,7 +11,7 @@ import personas
 
 # 多 persona：每个角色独立 session，切换即切换聊天对象
 USER_ID = "godot"
-DEFAULT_PERSONA = "french_student_male"
+DEFAULT_PERSONA = "finnish_discussion_root"
 
 app = FastAPI()
 
@@ -76,6 +76,14 @@ class ConversationSummary(BaseModel):
 
 # 会话存储：id -> { persona_ids, messages, created_at }
 CONVERSATIONS: dict[str, dict] = {}
+
+# 会话状态管理：id -> {
+#     "phase": "small_talk" | "religion_deep" | "allergy_deep" | "wrap_up" | "finished",
+#     "religion_discussed": bool,
+#     "allergy_discussed": bool,
+#     "sub_agent_turns": int,  # 子代理讨论轮数计数
+# }
+CONVERSATION_STATES: dict[str, dict] = {}
 
 # 单次回复最大字符数，避免超长/重复导致 Godot 不显示或卡顿
 MAX_REPLY_LENGTH = 2000
@@ -156,6 +164,29 @@ def _session_id(persona_id: str, conversation_id: str | None = None) -> str:
     return f"default_{persona_id}"
 
 
+def _detect_focus_flags(messages: list[dict]) -> tuple[bool, bool]:
+    """扫描玩家消息，判断是否提到宗教/过敏相关话题。
+
+    Returns:
+        (has_religion_focus, has_allergy_focus)
+    """
+    religion_keywords = ["宗教", "清真", "穆斯林", "犹太", "洁食", "halal", "kosher", "斋月", "素食", "纯素"]
+    allergy_keywords = ["过敏", "花生", "坚果", "海鲜", "乳糖", "奶制品", "麸质", "gluten"]
+
+    has_religion_focus = False
+    has_allergy_focus = False
+
+    for msg in messages:
+        if msg.get("role") == "user":
+            content = msg.get("content", "").lower()
+            if any(kw in content for kw in religion_keywords):
+                has_religion_focus = True
+            if any(kw in content for kw in allergy_keywords):
+                has_allergy_focus = True
+
+    return has_religion_focus, has_allergy_focus
+
+
 async def _get_or_create_session(runner, app_name: str, session_id: str):
     """获取或创建指定 persona 的 session。"""
     session = await runner.session_service.get_session(
@@ -169,110 +200,217 @@ async def _get_or_create_session(runner, app_name: str, session_id: str):
 
 
 async def _run_chat_round(conversation_id: str, persona_ids: list[str], user_content: str) -> str:
-    """在指定会话中追加用户消息，调用 ADK 生成回复并追加到会话，返回合并后的回复文本。"""
+    """在指定会话中追加用户消息，调用 ADK 生成回复并追加到会话，返回合并后的回复文本。
+
+    状态机架构：
+    - small_talk: 闲聊阶段，检测关键词
+    - religion_deep: 宗教专家子代理主导
+    - allergy_deep: 过敏专家子代理主导
+    - wrap_up: 收尾阶段
+    - finished: 完成，调用 Observer
+    """
     conv = CONVERSATIONS.get(conversation_id)
     if not conv:
         raise ValueError(f"conversation not found: {conversation_id}")
+
+    # 初始化会话状态
+    if conversation_id not in CONVERSATION_STATES:
+        CONVERSATION_STATES[conversation_id] = {
+            "phase": "small_talk",
+            "religion_discussed": False,
+            "allergy_discussed": False,
+            "sub_agent_turns": 0,
+        }
+
+    state = CONVERSATION_STATES[conversation_id]
     messages = conv["messages"]
     messages.append({"role": "user", "name": None, "content": user_content})
 
-    persona_names = [personas.PERSONAS[pid]["name"] for pid in persona_ids]
-    history_text = _format_conversation_history(messages)
+    # 获取当前状态
+    phase = state["phase"]
 
-    replies: list[str] = []
-    for idx, pid in enumerate(persona_ids):
-        runner = personas.RUNNERS[pid]
-        app_name = f"persona_{pid}"
-        session_id = _session_id(pid, conversation_id)
-        persona_name = persona_names[idx]
+    # === 状态机逻辑 ===
+    if phase == "small_talk":
+        # 检测关键词
+        has_religion, has_allergy = _detect_focus_flags(messages)
+
+        if has_religion and not state["religion_discussed"]:
+            state["phase"] = "religion_deep"
+            state["sub_agent_turns"] = 0
+            print(f"[STATE] {conversation_id}: small_talk -> religion_deep")
+        elif has_allergy and not state["allergy_discussed"]:
+            state["phase"] = "allergy_deep"
+            state["sub_agent_turns"] = 0
+            print(f"[STATE] {conversation_id}: small_talk -> allergy_deep")
+        elif state["religion_discussed"] and state["allergy_discussed"]:
+            state["phase"] = "wrap_up"
+            print(f"[STATE] {conversation_id}: small_talk -> wrap_up")
+        else:
+            # 继续闲聊
+            pass
+
+    elif phase == "religion_deep":
+        state["sub_agent_turns"] += 1
+        # 3-4轮后返回
+        if state["sub_agent_turns"] >= 3:
+            state["religion_discussed"] = True
+            if state["allergy_discussed"]:
+                state["phase"] = "wrap_up"
+            else:
+                state["phase"] = "small_talk"
+            print(f"[STATE] {conversation_id}: religion_deep -> {state['phase']}")
+
+    elif phase == "allergy_deep":
+        state["sub_agent_turns"] += 1
+        # 3-4轮后返回
+        if state["sub_agent_turns"] >= 3:
+            state["allergy_discussed"] = True
+            if state["religion_discussed"]:
+                state["phase"] = "wrap_up"
+            else:
+                state["phase"] = "small_talk"
+            print(f"[STATE] {conversation_id}: allergy_deep -> {state['phase']}")
+
+    elif phase == "wrap_up":
+        # 检测玩家是否确认
+        user_lower = user_content.lower()
+        affirmative_words = ["是", "好了", "可以", "没问题", "考虑清楚了", "没了", "没有"]
+        if any(word in user_lower for word in affirmative_words):
+            state["phase"] = "finished"
+            print(f"[STATE] {conversation_id}: wrap_up -> finished")
+
+    # === 根据状态调用对应的 Agent ===
+    if phase == "small_talk":
+        # ROOT Agent 闲聊
+        return await _call_root_agent(conversation_id, "finnish_discussion_root", user_content, messages)
+    elif phase == "religion_deep":
+        # 宗教专家主导
+        return await _call_root_agent(conversation_id, "finnish_discussion_root", user_content, messages)
+    elif phase == "allergy_deep":
+        # 过敏专家主导
+        return await _call_root_agent(conversation_id, "finnish_discussion_root", user_content, messages)
+    elif phase == "wrap_up":
+        # ROOT Agent 收尾
+        reply = await _call_root_agent(conversation_id, "finnish_discussion_root", user_content, messages)
+        # 如果已进入 finished，调用 Observer
+        if state["phase"] == "finished":
+            observer_reply = await _call_observer(conversation_id, messages)
+            return f"{reply}\n\n{observer_reply}"
+        return reply
+    elif phase == "finished":
+        # 已完成，只返回 Observer 总结
+        return await _call_observer(conversation_id, messages)
+
+    return "（对话状态异常，请重启会话）"
+
+
+async def _call_root_agent(conversation_id: str, persona_id: str, user_content: str, messages: list[dict]) -> str:
+    """调用 ROOT Agent（芬兰学生讨论组）。"""
+    runner = personas.RUNNERS[persona_id]
+    app_name = f"persona_{persona_id}"
+    session_id = _session_id(persona_id, conversation_id)
+    persona_name = personas.PERSONAS[persona_id]["name"]
+
+    await _get_or_create_session(runner, app_name, session_id)
+
+    # 传入对话历史
+    history_text = _format_conversation_history(messages)
+    user_msg = f"{user_content}\n\n【对话记录】\n{history_text}" if history_text else user_content
+
+    new_message = types.Content(role="user", parts=[types.Part(text=user_msg)])
+    events = []
+    async for evt in runner.run_async(
+        user_id=USER_ID, session_id=session_id, new_message=new_message
+    ):
+        events.append(evt)
+
+        # Log tool call events
+        if hasattr(evt, 'content') and evt.content:
+            if hasattr(evt.content, 'parts'):
+                for part in evt.content.parts or []:
+                    if hasattr(part, 'function_call'):
+                        print(f"[TOOL CALL] {persona_name} -> {part.function_call.name}({part.function_call.args})")
+                    elif hasattr(part, 'function_response'):
+                        print(f"[TOOL RESULT] {persona_name} <- {part.function_response.response}")
+
+    ai_reply = _get_reply_from_events(events)
+    if ai_reply:
+        messages.append({"role": "model", "name": persona_name, "content": ai_reply})
+        return ai_reply
+
+    return "（Mikko 和 Aino 暂时不知道说什么）"
+
+
+async def _call_observer(conversation_id: str, messages: list[dict]) -> str:
+    """调用 Observer 生成总结。"""
+    runner = personas.RUNNERS["observer"]
+    app_name = "persona_observer"
+    session_id = _session_id("observer", conversation_id)
+    persona_name = personas.PERSONAS["observer"]["name"]
+
+    await _get_or_create_session(runner, app_name, session_id)
+
+    # 传入对话历史
+    history_text = _format_conversation_history(messages)
+    user_msg = f"【请总结以下对话】\n\n{history_text}"
+
+    new_message = types.Content(role="user", parts=[types.Part(text=user_msg)])
+    events = []
+    async for evt in runner.run_async(
+        user_id=USER_ID, session_id=session_id, new_message=new_message
+    ):
+        events.append(evt)
+
+    ai_reply = _get_reply_from_events(events)
+    if ai_reply:
+        messages.append({"role": "model", "name": persona_name, "content": ai_reply})
+        return f"\n【{persona_name}】\n{ai_reply}"
+
+    return ""
+
+
+async def _generate_group_initial_messages(persona_ids: list[str], conversation_id: str) -> list[dict]:
+    """生成群聊开场消息，返回 MessageItem 列表。"""
+    out: list[dict] = []
+
+    # 检查是否是芬兰学生讨论组
+    is_finnish = "finnish_discussion_root" in persona_ids
+
+    if is_finnish:
+        # ROOT Agent 生成开场对话（同时扮演 Mikko 和 Aino）
+        runner = personas.RUNNERS["finnish_discussion_root"]
+        app_name = "persona_finnish_discussion_root"
+        session_id = _session_id("finnish_discussion_root", conversation_id)
+        persona_name = personas.PERSONAS["finnish_discussion_root"]["name"]
+
         await _get_or_create_session(runner, app_name, session_id)
 
-        if len(persona_ids) > 1:
-            group_context = (
-                f"【群聊模式】现在有 {len(persona_ids)} 位角色在对话：{', '.join(persona_names)}。\n"
-            )
-            if history_text:
-                group_context += "下面是对话记录，请在该上下文中继续对话：\n"
-                group_context += history_text + "\n\n"
-            group_context += f"你是 {persona_name}，请以你的角色身份参与对话。【协作规则】如果你不确定答案或需要他人意见，可以使用 ask_agent 工具询问其他角色。"
-            user_msg = group_context
-        else:
-            user_msg = user_content
+        # 开场提示
+        initial_prompt = """【场景】你们是两个芬兰学生 Mikko 和 Aino，正在讨论今晚聚餐的准备。
+话题包括：人数、地点、时间、气氛等轻松话题。
 
-        new_message = types.Content(role="user", parts=[types.Part(text=user_msg)])
+请以你们两个的口吻开始对话，格式如下：
+Mikko: [Mikko 说的话]
+Aino: [Aino 说的话]
+
+注意：
+- 每次回复 2-3 句话，不要信息轰炸
+- 适当夹杂芬兰语词：Moi, Kiitos, No niin, Selvä
+- 保持轻松愉快的氛围
+"""
+
+        new_message = types.Content(role="user", parts=[types.Part(text=initial_prompt)])
         events = []
         async for evt in runner.run_async(
             user_id=USER_ID, session_id=session_id, new_message=new_message
         ):
             events.append(evt)
-            
-            # Log tool call events
-            if hasattr(evt, 'content') and evt.content:
-                if hasattr(evt.content, 'parts'):
-                    for part in evt.content.parts or []:
-                        if hasattr(part, 'function_call'):
-                            print(f"[TOOL CALL] {persona_name} -> {part.function_call.name}({part.function_call.args})")
-                        elif hasattr(part, 'function_response'):
-                            print(f"[TOOL RESULT] {persona_name} <- {part.function_response.response}")
+
         ai_reply = _get_reply_from_events(events)
         if ai_reply:
-            replies.append(f"[{persona_name}] {ai_reply}")
-            messages.append({"role": "model", "name": persona_name, "content": ai_reply})
-
-    if not replies:
-        return "（大家都没想出要说啥，再说一句试试？）"
-    return "\n\n".join(replies)
-
-
-async def _generate_group_initial_messages(persona_ids: list[str], conversation_id: str) -> list[dict]:
-    """生成群聊开场消息（法国学生特殊逻辑或通用开场），返回 MessageItem 列表。"""
-    is_french = (
-        len(persona_ids) == 2
-        and "french_student_male" in persona_ids
-        and "french_student_female" in persona_ids
-    )
-    initial_prompt_fr = """Vous discutez de la préparation de la soirée de ce soir.
-Parlez de la nourriture à préparer (quels plats, qui apporte quoi),
-de la décoration et de la disposition de la salle,
-et de qui va s'occuper de quoi.
-Commencez la conversation naturellement."""
-    out: list[dict] = []
-    if is_french:
-        male_runner = personas.RUNNERS["french_student_male"]
-        male_app = "persona_french_student_male"
-        male_session = _session_id("french_student_male", conversation_id)
-        await _get_or_create_session(male_runner, male_app, male_session)
-        male_msg = f"【场景】你和另一位法国女学生正在讨论今晚 party 的准备。\n\n{initial_prompt_fr}\n\n请用中文回复，可适当夹杂法语词。"
-        male_content = types.Content(role="user", parts=[types.Part(text=male_msg)])
-        male_events = []
-        async for evt in male_runner.run_async(
-            user_id=USER_ID, session_id=male_session, new_message=male_content
-        ):
-            male_events.append(evt)
-        male_reply = _get_reply_from_events(male_events)
-        male_name = personas.PERSONAS["french_student_male"]["name"]
-        if male_reply:
-            out.append({"role": "model", "name": male_name, "content": male_reply})
-        female_runner = personas.RUNNERS["french_student_female"]
-        female_app = "persona_french_student_female"
-        female_session = _session_id("french_student_female", conversation_id)
-        await _get_or_create_session(female_runner, female_app, female_session)
-        female_context = f"【场景】你和另一位法国男学生正在讨论今晚 party 的准备。\n\n{initial_prompt_fr}\n\n"
-        if male_reply:
-            female_context += f"对方说：{male_reply}\n\n请用中文回复，可适当夹杂法语词，回应对方并继续讨论。"
-        else:
-            female_context += "请用中文回复，可适当夹杂法语词，开始讨论。"
-        female_content = types.Content(role="user", parts=[types.Part(text=female_context)])
-        female_events = []
-        async for evt in female_runner.run_async(
-            user_id=USER_ID, session_id=female_session, new_message=female_content
-        ):
-            female_events.append(evt)
-        female_reply = _get_reply_from_events(female_events)
-        female_name = personas.PERSONAS["french_student_female"]["name"]
-        if female_reply:
-            out.append({"role": "model", "name": female_name, "content": female_reply})
+            out.append({"role": "model", "name": persona_name, "content": ai_reply})
     else:
+        # 通用开场（兼容其他 persona）
         names = [personas.PERSONAS[pid]["name"] for pid in persona_ids]
         for pid in persona_ids:
             runner = personas.RUNNERS[pid]
@@ -308,7 +446,7 @@ def list_personas():
 
 @app.post("/conversations", response_model=ConversationItem)
 async def create_conversation(req: CreateConversationReq):
-    """创建会话（单人或群聊）。群聊且为两位法国学生时会自动生成开场对话。"""
+    """创建会话（单人或群聊）。芬兰学生讨论组会自动生成开场对话。"""
     persona_ids = [p.strip().lower() for p in req.persona_ids if p.strip()]
     if not persona_ids:
         persona_ids = [DEFAULT_PERSONA]
@@ -325,7 +463,8 @@ async def create_conversation(req: CreateConversationReq):
         "messages": [],
         "created_at": now,
     }
-    if len(persona_ids) >= 2:
+    # 芬兰学生讨论组或多人群聊时生成开场对话
+    if len(persona_ids) >= 2 or "finnish_discussion_root" in persona_ids:
         initial = await _generate_group_initial_messages(persona_ids, conv_id)
         CONVERSATIONS[conv_id]["messages"] = initial
     msgs = CONVERSATIONS[conv_id]["messages"]

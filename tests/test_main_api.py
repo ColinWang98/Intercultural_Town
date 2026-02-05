@@ -42,7 +42,7 @@ class TestGetPersonas:
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, list)
-        # Should have at least the french_discussion_team
+        # Should have at least the finnish_discussion_root
         assert len(data) >= 1
 
     def test_get_personas_structure(self, client):
@@ -63,7 +63,7 @@ class TestCreateConversation:
         """POST /conversations creates a new conversation."""
         response = client.post(
             "/conversations",
-            json={"persona_ids": ["french_discussion_team"]}
+            json={"persona_ids": ["finnish_discussion_root"]}
         )
         assert response.status_code == 200
         data = response.json()
@@ -71,7 +71,7 @@ class TestCreateConversation:
         assert "persona_ids" in data
         assert "messages" in data
         assert "created_at" in data
-        assert data["persona_ids"] == ["french_discussion_team"]
+        assert data["persona_ids"] == ["finnish_discussion_root"]
 
     def test_create_conversation_invalid_persona(self, client, mock_generate_initial):
         """POST /conversations with invalid persona returns 400."""
@@ -87,29 +87,28 @@ class TestCreateConversation:
             "/conversations",
             json={"persona_ids": []}
         )
-        # Empty defaults to DEFAULT_PERSONA (french_discussion_team)
+        # Empty defaults to DEFAULT_PERSONA (finnish_discussion_root)
         assert response.status_code == 200
 
 
-class TestCreateConversationFrenchStudentsOpeningDialogue:
-    """Tests for automatic opening dialogue when creating French students conversation."""
+class TestCreateConversationFinnishDiscussionOpeningDialogue:
+    """Tests for automatic opening dialogue when creating Finnish discussion conversation."""
 
-    def test_french_students_triggers_opening_dialogue(self, client, mock_generate_initial):
-        """Creating conversation with both French students triggers opening dialogue."""
+    def test_finnish_discussion_triggers_opening_dialogue(self, client, mock_generate_initial):
+        """Creating conversation with Finnish discussion team triggers opening dialogue."""
         mock_generate_initial.return_value = [
-            {"role": "model", "name": "芬兰学生（男）", "content": "Moi!"},
-            {"role": "model", "name": "芬兰学生（女）", "content": "Hei!"},
+            {"role": "model", "name": "芬兰学生讨论组", "content": "Mikko: Moi!\nAino: Hei!"},
         ]
-        
+
         response = client.post(
             "/conversations",
-            json={"persona_ids": ["french_student_male", "french_student_female"]}
+            json={"persona_ids": ["finnish_discussion_root"]}
         )
         assert response.status_code == 200
         data = response.json()
         assert "messages" in data
-        # Should have opening messages from the mock
-        assert len(data["messages"]) == 2
+        # Should have opening messages from mock
+        assert len(data["messages"]) == 1
 
 
 class TestSendMessage:
@@ -128,7 +127,7 @@ class TestSendMessage:
         # First create a conversation
         create_response = client.post(
             "/conversations",
-            json={"persona_ids": ["french_discussion_team"]}
+            json={"persona_ids": ["finnish_discussion_root"]}
         )
         assert create_response.status_code == 200
         conv_id = create_response.json()["id"]
@@ -148,7 +147,7 @@ class TestSendMessage:
         # First create a conversation
         create_response = client.post(
             "/conversations",
-            json={"persona_ids": ["french_discussion_team"]}
+            json={"persona_ids": ["finnish_discussion_root"]}
         )
         conv_id = create_response.json()["id"]
 
@@ -270,13 +269,13 @@ class TestConversationIsolation:
         # Create two conversations
         conv1_response = client.post(
             "/conversations",
-            json={"persona_ids": ["french_discussion_team"]}
+            json={"persona_ids": ["finnish_discussion_root"]}
         )
         conv1_id = conv1_response.json()["id"]
 
         conv2_response = client.post(
             "/conversations",
-            json={"persona_ids": ["french_discussion_team"]}
+            json={"persona_ids": ["finnish_discussion_root"]}
         )
         conv2_id = conv2_response.json()["id"]
 
@@ -290,26 +289,26 @@ class TestConversationIsolation:
         conv2_detail = client.get(f"/conversations/{conv2_id}")
         conv2_messages = conv2_detail.json()["messages"]
 
-        # conv2 should NOT contain the message sent to conv1
+        # conv2 should NOT contain message sent to conv1
         for msg in conv2_messages:
             assert "Message for conversation 1" not in msg.get("content", "")
 
     def test_get_conversation_returns_correct_data(self, client, mock_generate_initial):
-        """GET /conversations/{id} returns the correct conversation."""
+        """GET /conversations/{id} returns correct conversation."""
         # Create a conversation
         create_response = client.post(
             "/conversations",
-            json={"persona_ids": ["french_discussion_team"]}
+            json={"persona_ids": ["finnish_discussion_root"]}
         )
         conv_id = create_response.json()["id"]
 
-        # Get the conversation
+        # Get conversation
         get_response = client.get(f"/conversations/{conv_id}")
         assert get_response.status_code == 200
         data = get_response.json()
-        
+
         assert data["id"] == conv_id
-        assert data["persona_ids"] == ["french_discussion_team"]
+        assert data["persona_ids"] == ["finnish_discussion_root"]
 
     def test_get_nonexistent_conversation(self, client):
         """GET /conversations/{id} for nonexistent conversation returns 404."""
@@ -325,7 +324,7 @@ class TestGetConversationMessages:
         # Create a conversation
         create_response = client.post(
             "/conversations",
-            json={"persona_ids": ["french_discussion_team"]}
+            json={"persona_ids": ["finnish_discussion_root"]}
         )
         conv_id = create_response.json()["id"]
 
@@ -352,14 +351,14 @@ class TestGetConversationsList:
         # Create a conversation first
         client.post(
             "/conversations",
-            json={"persona_ids": ["french_discussion_team"]}
+            json={"persona_ids": ["finnish_discussion_root"]}
         )
 
         response = client.get("/conversations")
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, list)
-        
+
         # Each item should have summary fields
         if len(data) > 0:
             item = data[0]
