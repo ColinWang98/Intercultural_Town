@@ -42,8 +42,8 @@ class TestGetPersonas:
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, list)
-        # Should have at least the finnish_discussion_root
-        assert len(data) >= 1
+        # Should have at least mikko and aino
+        assert len(data) >= 2
 
     def test_get_personas_structure(self, client):
         """Each persona has id and name fields."""
@@ -63,7 +63,7 @@ class TestCreateConversation:
         """POST /conversations creates a new conversation."""
         response = client.post(
             "/conversations",
-            json={"persona_ids": ["finnish_discussion_root"]}
+            json={"persona_ids": ["mikko", "aino"]}
         )
         assert response.status_code == 200
         data = response.json()
@@ -71,7 +71,7 @@ class TestCreateConversation:
         assert "persona_ids" in data
         assert "messages" in data
         assert "created_at" in data
-        assert data["persona_ids"] == ["finnish_discussion_root"]
+        assert data["persona_ids"] == ["mikko", "aino"]
 
     def test_create_conversation_invalid_persona(self, client, mock_generate_initial):
         """POST /conversations with invalid persona returns 400."""
@@ -87,8 +87,10 @@ class TestCreateConversation:
             "/conversations",
             json={"persona_ids": []}
         )
-        # Empty defaults to DEFAULT_PERSONA (finnish_discussion_root)
+        # Empty defaults to DEFAULT_PERSONAS (["mikko", "aino"])
         assert response.status_code == 200
+        data = response.json()
+        assert data["persona_ids"] == ["mikko", "aino"]
 
 
 class TestCreateConversationFinnishDiscussionOpeningDialogue:
@@ -102,7 +104,7 @@ class TestCreateConversationFinnishDiscussionOpeningDialogue:
 
         response = client.post(
             "/conversations",
-            json={"persona_ids": ["finnish_discussion_root"]}
+            json={"persona_ids": ["mikko", "aino"]}
         )
         assert response.status_code == 200
         data = response.json()
@@ -127,7 +129,7 @@ class TestSendMessage:
         # First create a conversation
         create_response = client.post(
             "/conversations",
-            json={"persona_ids": ["finnish_discussion_root"]}
+            json={"persona_ids": ["mikko", "aino"]}
         )
         assert create_response.status_code == 200
         conv_id = create_response.json()["id"]
@@ -147,7 +149,7 @@ class TestSendMessage:
         # First create a conversation
         create_response = client.post(
             "/conversations",
-            json={"persona_ids": ["finnish_discussion_root"]}
+            json={"persona_ids": ["mikko", "aino"]}
         )
         conv_id = create_response.json()["id"]
 
@@ -269,13 +271,13 @@ class TestConversationIsolation:
         # Create two conversations
         conv1_response = client.post(
             "/conversations",
-            json={"persona_ids": ["finnish_discussion_root"]}
+            json={"persona_ids": ["mikko", "aino"]}
         )
         conv1_id = conv1_response.json()["id"]
 
         conv2_response = client.post(
             "/conversations",
-            json={"persona_ids": ["finnish_discussion_root"]}
+            json={"persona_ids": ["mikko", "aino"]}
         )
         conv2_id = conv2_response.json()["id"]
 
@@ -298,7 +300,7 @@ class TestConversationIsolation:
         # Create a conversation
         create_response = client.post(
             "/conversations",
-            json={"persona_ids": ["finnish_discussion_root"]}
+            json={"persona_ids": ["mikko", "aino"]}
         )
         conv_id = create_response.json()["id"]
 
@@ -308,7 +310,7 @@ class TestConversationIsolation:
         data = get_response.json()
 
         assert data["id"] == conv_id
-        assert data["persona_ids"] == ["finnish_discussion_root"]
+        assert data["persona_ids"] == ["mikko", "aino"]
 
     def test_get_nonexistent_conversation(self, client):
         """GET /conversations/{id} for nonexistent conversation returns 404."""
@@ -324,7 +326,7 @@ class TestGetConversationMessages:
         # Create a conversation
         create_response = client.post(
             "/conversations",
-            json={"persona_ids": ["finnish_discussion_root"]}
+            json={"persona_ids": ["mikko", "aino"]}
         )
         conv_id = create_response.json()["id"]
 
@@ -351,7 +353,7 @@ class TestGetConversationsList:
         # Create a conversation first
         client.post(
             "/conversations",
-            json={"persona_ids": ["finnish_discussion_root"]}
+            json={"persona_ids": ["mikko", "aino"]}
         )
 
         response = client.get("/conversations")
