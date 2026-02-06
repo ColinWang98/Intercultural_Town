@@ -16,16 +16,18 @@ Observer 是一个特殊的 persona，用于**总结玩家和各个 agent 之间
 
 ### 1. 在 Godot 中调用
 
-在聊天 UI 或某个按钮/功能里，发送消息时指定 `persona="observer"`，并把**对话历史**作为 `user_input`：
+使用 REST：先创建仅含 observer 的会话，再发一条消息（内容为对话历史或「请总结上述对话」）：
 
 ```gdscript
-# 示例：收集最近 N 条对话，发给 observer 总结
+# 示例：先 POST /conversations 创建 observer 会话，再 POST .../messages 发总结请求
+# 1) 创建会话
+var payload_create = JSON.stringify({"persona_ids": ["observer"]})
+http_request.request("http://127.0.0.1:8000/conversations", headers, HTTPClient.METHOD_POST, payload_create)
+# 2) 收到响应后取 id，再发消息（content 为对话历史或「请总结上述对话：\n」+ 历史）
 var chat_history = "Player: 你好\n法国学生（男）: Bonjour!\n法国学生（女）: Salut!\n..."
-var payload = JSON.stringify({
-    "user_input": chat_history,
-    "persona": "observer"
-})
-http_request.request("http://127.0.0.1:8000/chat", headers, HTTPClient.METHOD_POST, payload)
+var payload_msg = JSON.stringify({"content": "请总结上述对话：\n" + chat_history})
+http_request.request("http://127.0.0.1:8000/conversations/" + conversation_id + "/messages", headers, HTTPClient.METHOD_POST, payload_msg)
+# 响应中的 reply 即为 Observer 的总结
 ```
 
 ### 2. 后端处理
