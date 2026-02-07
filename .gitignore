@@ -1,0 +1,93 @@
+# ============================================================================
+# .gitignore - Backend 项目
+# ============================================================================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 虚拟环境
+venv/
+env/
+ENV/
+.venv
+
+# 环境变量（包含敏感密钥）
+.env
+.env.local
+.env.production
+*.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.cursor/
+.codex/
+
+# 日志
+logs/
+*.log
+server.log
+backend.log
+
+# 测试
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 测试数据
+test_data/
+test_*.json
+final_test*.json
+response*.json
+
+# 数据库
+*.db
+*.sqlite
+*.sqlite3
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Godot
+.adk/
+.godot/
+import/
+
+# 归档文件夹
+docs_archive/
+code_archive/
+temp_dirs/
+
+# AI 工具（保留配置，忽略数据）
+.sisyphus/drafts/
+.sisyphus/notepads/
+.agents/skills/
+
+# 临时文件
+*.tmp
+*.bak
+*.swp
+*~.nib

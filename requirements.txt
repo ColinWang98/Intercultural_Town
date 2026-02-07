@@ -1,0 +1,23 @@
+# ============================================================================
+# Backend 依赖 - Azure OpenAI 混合方案
+# ============================================================================
+
+# FastAPI 核心依赖
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.0.0
+
+# Google ADK
+google-adk>=0.1.0
+
+# LiteLlm（支持多种 AI 模型）
+litellm>=1.0.0
+
+# 环境变量加载
+python-dotenv>=1.0.0
+
+# OpenAI SDK（用于 Azure OpenAI）
+openai>=1.0.0
+
+# 其他依赖
+google-genai>=0.1.0

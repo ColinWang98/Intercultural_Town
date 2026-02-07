@@ -49,8 +49,25 @@ class PersonaItem(BaseModel):
 
 
 # ---------- RESTful: 会话与消息 ----------
+
+class DynamicPersona(BaseModel):
+    """动态 Persona 配置，允许在 Godot 中定义角色信息而无需修改后端代码"""
+    id: str
+    name: str
+    gender: str = "Male"  # 性别：Male, Female, Non-binary, Other
+    personality: str = ""  # 性格描述
+    personality_type: str = "Extrovert"  # Extrovert, Introvert, Ambivert
+    interests: str = ""  # 兴趣爱好
+    speaking_style: str = ""  # 说话风格
+    likes: list[str] = []  # 喜好列表
+    dislikes: list[str] = []  # 不喜欢列表
+    current_state: str = ""  # 当前状态
+    location_hint: str = ""  # 地点提示
+
+
 class CreateConversationReq(BaseModel):
     persona_ids: list[str]
+    dynamic_personas: list[DynamicPersona] = []  # 动态 persona 配置（可选）
 
 
 class PostMessageReq(BaseModel):
@@ -78,7 +95,7 @@ class ConversationSummary(BaseModel):
     message_count: int
 
 
-# 会话存储：id -> { persona_ids, messages, created_at }
+# 会话存储：id -> { persona_ids, messages, created_at, dynamic_personas }
 CONVERSATIONS: dict[str, dict] = {}
 
 # 会话状态管理：id -> {
@@ -105,6 +122,70 @@ def _format_conversation_history(messages: list[dict]) -> str:
         elif content:
             lines.append(content)
     return "\n".join(lines)
+
+
+def _generate_dynamic_persona_instruction(dynamic_persona: DynamicPersona) -> str:
+    """生成动态 persona 的 AI 指令"""
+    # 性别映射
+    gender_map = {
+        "Male": "男性",
+        "Female": "女性",
+        "Non-binary": "非二元性别",
+        "Other": "其他性别"
+    }
+    gender_text = gender_map.get(dynamic_persona.gender, dynamic_persona.gender)
+
+    # 性格类型映射
+    personality_type_map = {
+        "Extrovert": "外向热情",
+        "Introvert": "内向文静",
+        "Ambivert": "中立平衡"
+    }
+    personality_type_text = personality_type_map.get(dynamic_persona.personality_type, dynamic_persona.personality_type)
+
+    # 构建基础指令
+    instruction = f"""你是 **{dynamic_persona.name}**，{gender_text}。
+
+"""
+    # 添加性别相关提示
+    if dynamic_persona.gender == "Male":
+        instruction += "你是男性角色，请用男性的口吻说话。\n"
+    elif dynamic_persona.gender == "Female":
+        instruction += "你是女性角色，请用女性的口吻说话。\n"
+
+    # 添加性格描述
+    if dynamic_persona.personality:
+        instruction += f"\n**性格**：{dynamic_persona.personality}\n"
+    else:
+        instruction += f"\n**性格类型**：{personality_type_text}\n"
+
+    # 添加兴趣
+    if dynamic_persona.interests:
+        instruction += f"**兴趣爱好**：{dynamic_persona.interests}\n"
+
+    # 添加说话风格
+    if dynamic_persona.speaking_style:
+        instruction += f"**说话风格**：{dynamic_persona.speaking_style}\n"
+
+    # 添加喜好
+    if dynamic_persona.likes:
+        instruction += f"**喜好**：{', '.join(dynamic_persona.likes)}\n"
+
+    # 添加不喜欢
+    if dynamic_persona.dislikes:
+        instruction += f"**不喜欢**：{', '.join(dynamic_persona.dislikes)}\n"
+
+    # 添加当前状态
+    if dynamic_persona.current_state:
+        instruction += f"\n**当前状态**：{dynamic_persona.current_state}\n"
+
+    # 添加地点提示
+    if dynamic_persona.location_hint:
+        instruction += f"**当前位置**：{dynamic_persona.location_hint}\n"
+
+    instruction += "\n请严格按照上述角色设定进行对话。"
+
+    return instruction
 
 def _strip_thinking(text: str) -> str:
     """尽量移除模型输出中的"思考过程"片段（如 <think>...</think>，含大小写变体）。"""
@@ -253,6 +334,8 @@ async def _run_chat_round(conversation_id: str, persona_ids: list[str], user_con
     - allergy_deep: 过敏专家子代理主导
     - wrap_up: 收尾阶段
     - finished: 完成，调用 Observer
+
+    支持动态 persona：从会话中获取 dynamic_personas 配置。
     """
     conv = CONVERSATIONS.get(conversation_id)
     if not conv:
@@ -270,6 +353,12 @@ async def _run_chat_round(conversation_id: str, persona_ids: list[str], user_con
     state = CONVERSATION_STATES[conversation_id]
     messages = conv["messages"]
     messages.append({"role": "user", "name": None, "content": user_content})
+
+    # 获取动态 persona 映射表
+    dynamic_personas_list = conv.get("dynamic_personas", [])
+    dynamic_personas_map: dict[str, DynamicPersona] = {
+        dp.id: dp for dp in dynamic_personas_list
+    }
 
     # 获取当前状态
     phase = state["phase"]
@@ -330,22 +419,26 @@ async def _run_chat_round(conversation_id: str, persona_ids: list[str], user_con
     # === 根据状态调用对应的 Agent ===
     if phase == "small_talk":
         # 芬兰学生闲聊
-        return await _finnish_students_respond(conversation_id, user_content, messages)
+        return await _finnish_students_respond(conversation_id, user_content, messages, dynamic_personas_map)
     elif phase == "religion_deep":
         # 宗教专家附身 Mikko
         expert_reply = await _expert_respond(
             conversation_id, user_content, messages,
             expert_id="religion_expert",
             expert_display_name="Mikko",
+            dynamic_personas_map=dynamic_personas_map,
         )
         # Aino 可以补充（可选）
+        aino_dynamic = dynamic_personas_map.get("aino")
         aino_reply = await _call_agent(
             conversation_id, "aino",
             f"【对话记录】\n{_format_conversation_history(messages)}\n\nMikko 刚刚说了关于宗教饮食禁忌的内容：{expert_reply}\n\n玩家说：{user_content}\n\n请简短回应或补充，1句话即可。",
             messages,
+            aino_dynamic,
         )
         if aino_reply:
-            return f"{expert_reply}\n\nAino: {aino_reply}"
+            aino_name = dynamic_personas_map.get("aino", DynamicPersona(name="Aino")).name
+            return f"{expert_reply}\n\n{aino_name}: {aino_reply}"
         return expert_reply
     elif phase == "allergy_deep":
         # 过敏专家附身 Aino
@@ -353,19 +446,23 @@ async def _run_chat_round(conversation_id: str, persona_ids: list[str], user_con
             conversation_id, user_content, messages,
             expert_id="allergy_expert",
             expert_display_name="Aino",
+            dynamic_personas_map=dynamic_personas_map,
         )
         # Mikko 可以补充（可选）
+        mikko_dynamic = dynamic_personas_map.get("mikko")
         mikko_reply = await _call_agent(
             conversation_id, "mikko",
             f"【对话记录】\n{_format_conversation_history(messages)}\n\nAino 刚刚说了关于食物过敏的内容：{expert_reply}\n\n玩家说：{user_content}\n\n请简短回应或补充，1句话即可。",
             messages,
+            mikko_dynamic,
         )
         if mikko_reply:
-            return f"{expert_reply}\n\nMikko: {mikko_reply}"
+            mikko_name = dynamic_personas_map.get("mikko", DynamicPersona(name="Mikko")).name
+            return f"{expert_reply}\n\n{mikko_name}: {mikko_reply}"
         return expert_reply
     elif phase == "wrap_up":
         # 芬兰学生收尾
-        reply = await _finnish_students_respond(conversation_id, user_content, messages)
+        reply = await _finnish_students_respond(conversation_id, user_content, messages, dynamic_personas_map)
         # 如果已进入 finished，调用 Observer
         if state["phase"] == "finished":
             observer_reply = await _call_observer(conversation_id, messages)
@@ -378,14 +475,38 @@ async def _run_chat_round(conversation_id: str, persona_ids: list[str], user_con
     return "（对话状态异常，请重启会话）"
 
 
-async def _call_agent(conversation_id: str, persona_id: str, prompt: str, messages: list[dict]) -> str:
-    """调用单个 Agent。"""
+async def _call_agent(
+    conversation_id: str,
+    persona_id: str,
+    prompt: str,
+    messages: list[dict],
+    dynamic_persona: DynamicPersona | None = None
+) -> str:
+    """调用单个 Agent。
+
+    Args:
+        conversation_id: 会话 ID
+        persona_id: 角色 ID
+        prompt: 提示文本
+        messages: 消息列表
+        dynamic_persona: 可选的动态 persona 配置
+    """
     runner = personas.RUNNERS[persona_id]
     app_name = f"persona_{persona_id}"
     session_id = _session_id(persona_id, conversation_id)
-    persona_name = personas.PERSONAS[persona_id]["name"]
+
+    # 如果有动态 persona，使用动态 persona 的名字；否则使用预定义名字
+    if dynamic_persona:
+        persona_name = dynamic_persona.name
+    else:
+        persona_name = personas.PERSONAS[persona_id]["name"]
 
     await _get_or_create_session(runner, app_name, session_id)
+
+    # 如果有动态 persona，将动态 persona 指令添加到提示中
+    if dynamic_persona:
+        dynamic_instruction = _generate_dynamic_persona_instruction(dynamic_persona)
+        prompt = f"{dynamic_instruction}\n\n{prompt}"
 
     new_message = types.Content(role="user", parts=[types.Part(text=prompt)])
     events = []
@@ -454,8 +575,23 @@ def _decide_speaker_order(messages: list[dict], user_content: str) -> list[str]:
     return [first, second]
 
 
-async def _finnish_students_respond(conversation_id: str, user_content: str, messages: list[dict]) -> str:
-    """两个芬兰学生轮流响应玩家。"""
+async def _finnish_students_respond(
+    conversation_id: str,
+    user_content: str,
+    messages: list[dict],
+    dynamic_personas_map: dict[str, DynamicPersona] | None = None
+) -> str:
+    """两个芬兰学生轮流响应玩家。
+
+    Args:
+        conversation_id: 会话 ID
+        user_content: 用户消息
+        messages: 消息列表
+        dynamic_personas_map: 动态 persona 映射表（可选）
+    """
+    if dynamic_personas_map is None:
+        dynamic_personas_map = {}
+
     speaker_order = _decide_speaker_order(messages, user_content)
 
     replies = []
@@ -463,7 +599,12 @@ async def _finnish_students_respond(conversation_id: str, user_content: str, mes
 
     for persona_id in speaker_order:
         other_name = "Aino" if persona_id == "mikko" else "Mikko"
-        persona_name = personas.PERSONAS[persona_id]["name"]
+
+        # 获取 persona 名称（优先使用动态 persona）
+        if persona_id in dynamic_personas_map:
+            persona_name = dynamic_personas_map[persona_id].name
+        else:
+            persona_name = personas.PERSONAS[persona_id]["name"]
 
         # 构建提示：包含对话历史和上下文
         prompt_parts = []
@@ -481,7 +622,9 @@ async def _finnish_students_respond(conversation_id: str, user_content: str, mes
 
         prompt = "\n\n".join(prompt_parts)
 
-        reply = await _call_agent(conversation_id, persona_id, prompt, messages)
+        # 获取动态 persona（如果有）
+        dynamic_persona = dynamic_personas_map.get(persona_id)
+        reply = await _call_agent(conversation_id, persona_id, prompt, messages, dynamic_persona)
         if reply:
             # 带上名字前缀
             replies.append(f"{persona_name}: {reply}")
@@ -495,6 +638,7 @@ async def _expert_respond(
     messages: list[dict],
     expert_id: str,
     expert_display_name: str,
+    dynamic_personas_map: dict[str, DynamicPersona] | None = None,
 ) -> str:
     """Expert 附身模式：专家以角色身份回应玩家。
 
@@ -504,10 +648,14 @@ async def _expert_respond(
         messages: 对话历史
         expert_id: 专家 persona ID（如 "religion_expert"）
         expert_display_name: 显示名称（如 "Mikko"）
+        dynamic_personas_map: 动态 persona 映射表（可选）
 
     Returns:
         专家的回复（带名字前缀）
     """
+    if dynamic_personas_map is None:
+        dynamic_personas_map = {}
+
     history_text = _format_conversation_history(messages)
 
     prompt_parts = []
@@ -519,8 +667,11 @@ async def _expert_respond(
 
     prompt = "\n\n".join(prompt_parts)
 
+    # 检查是否有对应的动态 persona（用于角色附身时的性格特征）
+    dynamic_persona = dynamic_personas_map.get(expert_display_name.lower())
+
     # 调用专家 Agent
-    reply = await _call_agent(conversation_id, expert_id, prompt, messages)
+    reply = await _call_agent(conversation_id, expert_id, prompt, messages, dynamic_persona)
 
     if reply:
         # 检查是否包含 [DONE] 标记（专家认为讨论完成）
@@ -561,9 +712,22 @@ async def _call_observer(conversation_id: str, messages: list[dict]) -> str:
     return ""
 
 
-async def _generate_group_initial_messages(persona_ids: list[str], conversation_id: str) -> list[dict]:
-    """生成群聊开场消息，返回 MessageItem 列表。"""
+async def _generate_group_initial_messages(
+    persona_ids: list[str],
+    conversation_id: str,
+    dynamic_personas_map: dict[str, DynamicPersona] | None = None
+) -> list[dict]:
+    """生成群聊开场消息，返回 MessageItem 列表。
+
+    Args:
+        persona_ids: 角色 ID 列表
+        conversation_id: 会话 ID
+        dynamic_personas_map: 动态 persona 映射表（可选）
+    """
     out: list[dict] = []
+
+    if dynamic_personas_map is None:
+        dynamic_personas_map = {}
 
     # 检查是否是芬兰学生组合（必须是恰好 ["mikko", "aino"] 或 ["aino", "mikko"]，无重复）
     is_finnish = (
@@ -584,8 +748,9 @@ async def _generate_group_initial_messages(persona_ids: list[str], conversation_
 示例：
 Moi! 今晚聚餐的事情准备得怎么样了？
 """
-        mikko_reply = await _call_agent(conversation_id, "mikko", mikko_prompt, out)
-        
+        mikko_dynamic = dynamic_personas_map.get("mikko")
+        mikko_reply = await _call_agent(conversation_id, "mikko", mikko_prompt, out, mikko_dynamic)
+
         # Aino 回应 Mikko
         if mikko_reply:
             aino_prompt = f"""【场景开始】你和好朋友 Mikko 正在讨论今晚聚餐的准备。
@@ -600,29 +765,68 @@ Mikko 刚刚说：{mikko_reply}
 示例：
 Selvä! 人数大概定了吗？我在想饮食方面有没有需要注意的。
 """
-            await _call_agent(conversation_id, "aino", aino_prompt, out)
+            aino_dynamic = dynamic_personas_map.get("aino")
+            await _call_agent(conversation_id, "aino", aino_prompt, out, aino_dynamic)
     else:
-        # 通用开场（兼容其他 persona）
-        names = [personas.PERSONAS[pid]["name"] for pid in persona_ids if pid in personas.PERSONAS]
+        # 通用开场（兼容其他 persona 和动态 persona）
+        names = []
         for pid in persona_ids:
-            if pid not in personas.PERSONAS:
-                continue
-            runner = personas.RUNNERS[pid]
-            app_name = f"persona_{pid}"
-            session_id = _session_id(pid, conversation_id)
-            persona_name = personas.PERSONAS[pid]["name"]
-            await _get_or_create_session(runner, app_name, session_id)
-            group_context = f"【群聊模式】现在有 {len(persona_ids)} 位角色在对话：{', '.join(names)}。"
-            group_context += f"你是 {persona_name}，请以你的角色身份开始对话。"
-            new_message = types.Content(role="user", parts=[types.Part(text=group_context)])
-            events = []
-            async for evt in runner.run_async(
-                user_id=USER_ID, session_id=session_id, new_message=new_message
-            ):
-                events.append(evt)
-            ai_reply = _get_reply_from_events(events)
-            if ai_reply:
-                out.append({"role": "model", "name": persona_name, "content": ai_reply})
+            if pid in dynamic_personas_map:
+                names.append(dynamic_personas_map[pid].name)
+            elif pid in personas.PERSONAS:
+                names.append(personas.PERSONAS[pid]["name"])
+
+        for pid in persona_ids:
+            # 如果是动态 persona，使用动态配置
+            if pid in dynamic_personas_map:
+                dp = dynamic_personas_map[pid]
+                runner = personas.RUNNERS.get("_dynamic_template")  # 使用通用 runner
+                if runner is None:
+                    # 如果没有通用 runner，使用 mikko 的 runner 作为模板
+                    runner = personas.RUNNERS["mikko"]
+
+                app_name = f"persona_{pid}"
+                session_id = _session_id(pid, conversation_id)
+                persona_name = dp.name
+
+                await _get_or_create_session(runner, app_name, session_id)
+
+                group_context = f"【群聊模式】现在有 {len(persona_ids)} 位角色在对话：{', '.join(names)}。"
+                group_context += f"你是 {persona_name}，请以你的角色身份开始对话。"
+
+                # 添加动态 persona 指令
+                dynamic_instruction = _generate_dynamic_persona_instruction(dp)
+                group_context = f"{dynamic_instruction}\n\n{group_context}"
+
+                new_message = types.Content(role="user", parts=[types.Part(text=group_context)])
+                events = []
+                async for evt in runner.run_async(
+                    user_id=USER_ID, session_id=session_id, new_message=new_message
+                ):
+                    events.append(evt)
+                ai_reply = _get_reply_from_events(events)
+                if ai_reply:
+                    out.append({"role": "model", "name": persona_name, "content": ai_reply})
+
+            # 如果是预定义 persona
+            elif pid in personas.PERSONAS:
+                runner = personas.RUNNERS[pid]
+                app_name = f"persona_{pid}"
+                session_id = _session_id(pid, conversation_id)
+                persona_name = personas.PERSONAS[pid]["name"]
+                await _get_or_create_session(runner, app_name, session_id)
+                group_context = f"【群聊模式】现在有 {len(persona_ids)} 位角色在对话：{', '.join(names)}。"
+                group_context += f"你是 {persona_name}，请以你的角色身份开始对话。"
+                new_message = types.Content(role="user", parts=[types.Part(text=group_context)])
+                events = []
+                async for evt in runner.run_async(
+                    user_id=USER_ID, session_id=session_id, new_message=new_message
+                ):
+                    events.append(evt)
+                ai_reply = _get_reply_from_events(events)
+                if ai_reply:
+                    out.append({"role": "model", "name": persona_name, "content": ai_reply})
+
     return out
 
 
@@ -640,7 +844,10 @@ def list_personas():
 
 @app.post("/conversations", response_model=ConversationItem)
 async def create_conversation(req: CreateConversationReq):
-    """创建会话（单人或群聊）。芬兰学生讨论组会自动生成开场对话。"""
+    """创建会话（单人或群聊）。芬兰学生讨论组会自动生成开场对话。
+
+    支持动态 persona：通过 dynamic_personas 参数传入角色配置，无需修改后端代码。
+    """
     persona_ids = [p.strip().lower() for p in req.persona_ids if p.strip()]
     if not persona_ids:
         persona_ids = DEFAULT_PERSONAS.copy()  # 默认使用芬兰学生双人组合
@@ -662,24 +869,42 @@ async def create_conversation(req: CreateConversationReq):
             detail=f"检测到重复的聊天对象: {dup_details}",
         )
 
-    invalid = [p for p in persona_ids if p not in personas.PERSONAS]
+    # 创建动态 persona 映射表
+    dynamic_personas_map: dict[str, DynamicPersona] = {}
+    for dp in req.dynamic_personas:
+        dynamic_personas_map[dp.id] = dp
+
+    # 验证 persona IDs：要么在预定义列表中，要么在动态 persona 中
+    invalid = []
+    for p in persona_ids:
+        if p not in personas.PERSONAS and p not in dynamic_personas_map:
+            invalid.append(p)
+
     if invalid:
+        available = list(personas.PERSONAS.keys()) + list(dynamic_personas_map.keys())
         raise HTTPException(
             400,
-            detail=f"未知的聊天对象: {', '.join(invalid)}，可用: {', '.join(personas.PERSONAS)}。",
+            detail=f"未知的聊天对象: {', '.join(invalid)}，可用: {', '.join(available)}。",
         )
+
     conv_id = uuid.uuid4().hex
     now = datetime.now(timezone.utc).isoformat()
     CONVERSATIONS[conv_id] = {
         "persona_ids": persona_ids,
         "messages": [],
         "created_at": now,
+        "dynamic_personas": req.dynamic_personas,  # 保存动态 persona 配置
     }
+
     # 芬兰学生讨论组或多人群聊时生成开场对话
     is_finnish_pair = len(persona_ids) == 2 and set(persona_ids) == {"mikko", "aino"}
     if len(persona_ids) >= 2 or is_finnish_pair:
         try:
-            initial = await _generate_group_initial_messages(persona_ids, conv_id)
+            initial = await _generate_group_initial_messages(
+                persona_ids,
+                conv_id,
+                dynamic_personas_map
+            )
             CONVERSATIONS[conv_id]["messages"] = initial
         except Exception as e:
             print(f"[WARNING] 生成开场对话失败: {e}")

@@ -337,7 +337,7 @@ PERSONAS = {
         "name": "Mikko",
         "model": _create_model(
             ollama_model="ollama_chat/qwen3:4b-instruct",
-            azure_model="azure/gpt-4o"
+            azure_model="azure/gpt-5-nano"
         ),
         "instruction": _mikko_instruction,
     },
@@ -345,7 +345,7 @@ PERSONAS = {
         "name": "Aino",
         "model": _create_model(
             ollama_model="ollama_chat/qwen3:4b-instruct-2507-fp16",
-            azure_model="azure/gpt-4o"
+            azure_model="azure/gpt-5-nano"
         ),
         "instruction": _aino_instruction,
     },
@@ -353,7 +353,7 @@ PERSONAS = {
         "name": "宗教禁忌专家",
         "model": _create_model(
             ollama_model="ollama_chat/qwen3:4b-instruct",
-            azure_model="azure/gpt-35-turbo"
+            azure_model="azure/gpt-5-nano"
         ),
         "instruction": _religion_expert_instruction,
     },
@@ -361,7 +361,7 @@ PERSONAS = {
         "name": "食物过敏专家",
         "model": _create_model(
             ollama_model="ollama_chat/qwen3:4b-instruct-2507-fp16",
-            azure_model="azure/gpt-35-turbo"
+            azure_model="azure/gpt-5-nano"
         ),
         "instruction": _allergy_expert_instruction,
     },
@@ -369,7 +369,7 @@ PERSONAS = {
         "name": "对话观察者",
         "model": _create_model(
             ollama_model="ollama_chat/qwen3:8b",
-            azure_model="azure/gpt-4o"
+            azure_model="azure/gpt-5-nano"
         ),
         "instruction": _observer_instruction,
     },
