@@ -1,0 +1,40 @@
+{
+  "branchName": "fix/duplicate-persona-ids",
+  "title": "修复重复 persona ID 导致的对话逻辑错误",
+  "description": "当用户传入重复的 persona ID（如 [\"mikko\", \"mikko\"]）时，后端错误地将其识别为芬兰学生双人组合，导致返回 Mikko 和 Aino 的对话，而不是两个相同的 Mikko agent。",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "在创建会话时检测并拒绝重复的 persona ID",
+      "priority": 1,
+      "passes": true,
+      "acceptanceCriteria": [
+        "当 POST /conversations 收到重复的 persona_ids 时，返回 400 错误",
+        "错误信息明确说明哪些 persona ID 重复了",
+        "例如: {\"detail\": \"检测到重复的聊天对象: mikko 出现了 2 次\"}"
+      ]
+    },
+    {
+      "id": "US-002",
+      "title": "修复群聊开场对话生成逻辑",
+      "priority": 2,
+      "passes": false,
+      "acceptanceCriteria": [
+        "修复 _generate_group_initial_messages 中的 is_finnish 判断逻辑",
+        "只有当 persona_ids 恰好是 [\"mikko\", \"aino\"]（任意顺序）时才使用芬兰学生双人对话",
+        "其他组合（包括 [\"mikko\", \"mikko\"]）不应触发芬兰学生专属逻辑"
+      ]
+    },
+    {
+      "id": "US-003",
+      "title": "添加测试用例",
+      "priority": 3,
+      "passes": false,
+      "acceptanceCriteria": [
+        "添加测试用例验证重复 persona ID 被正确拒绝",
+        "添加测试用例验证 [\"mikko\", \"aino\"] 正常工作",
+        "添加测试用例验证 [\"mikko\", \"mikko\"] 不会触发芬兰学生对话"
+      ]
+    }
+  ]
+}
