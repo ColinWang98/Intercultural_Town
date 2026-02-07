@@ -18,7 +18,7 @@
       "id": "US-002",
       "title": "修复群聊开场对话生成逻辑",
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "修复 _generate_group_initial_messages 中的 is_finnish 判断逻辑",
         "只有当 persona_ids 恰好是 [\"mikko\", \"aino\"]（任意顺序）时才使用芬兰学生双人对话",
