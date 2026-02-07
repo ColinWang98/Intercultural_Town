@@ -565,11 +565,11 @@ async def _generate_group_initial_messages(persona_ids: list[str], conversation_
     """生成群聊开场消息，返回 MessageItem 列表。"""
     out: list[dict] = []
 
-    # 检查是否是芬兰学生组合
-    is_finnish = all(pid in personas.FINNISH_STUDENTS for pid in persona_ids) if hasattr(personas, 'FINNISH_STUDENTS') else False
-    # 兼容旧的单 persona_id 检测
-    if not is_finnish:
-        is_finnish = "mikko" in persona_ids and "aino" in persona_ids
+    # 检查是否是芬兰学生组合（必须是恰好 ["mikko", "aino"] 或 ["aino", "mikko"]，无重复）
+    is_finnish = (
+        len(persona_ids) == 2 and
+        set(persona_ids) == {"mikko", "aino"}
+    )
 
     if is_finnish:
         # 两个独立 Agent 轮流生成开场对话
@@ -676,7 +676,7 @@ async def create_conversation(req: CreateConversationReq):
         "created_at": now,
     }
     # 芬兰学生讨论组或多人群聊时生成开场对话
-    is_finnish_pair = all(pid in personas.FINNISH_STUDENTS for pid in persona_ids) if hasattr(personas, 'FINNISH_STUDENTS') else False
+    is_finnish_pair = len(persona_ids) == 2 and set(persona_ids) == {"mikko", "aino"}
     if len(persona_ids) >= 2 or is_finnish_pair:
         try:
             initial = await _generate_group_initial_messages(persona_ids, conv_id)
