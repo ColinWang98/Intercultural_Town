@@ -92,6 +92,31 @@ class TestCreateConversation:
         data = response.json()
         assert data["persona_ids"] == ["mikko", "aino"]
 
+    def test_create_conversation_duplicate_persona_ids(self, client, mock_generate_initial):
+        """POST /conversations with duplicate persona_ids returns 400."""
+        response = client.post(
+            "/conversations",
+            json={"persona_ids": ["mikko", "mikko"]}
+        )
+        assert response.status_code == 400
+        data = response.json()
+        assert "detail" in data
+        assert "重复的聊天对象" in data["detail"]
+        assert "mikko" in data["detail"]
+
+    def test_create_conversation_triple_duplicate_persona_ids(self, client, mock_generate_initial):
+        """POST /conversations with triple duplicate persona_ids returns 400."""
+        response = client.post(
+            "/conversations",
+            json={"persona_ids": ["aino", "aino", "aino"]}
+        )
+        assert response.status_code == 400
+        data = response.json()
+        assert "detail" in data
+        assert "重复的聊天对象" in data["detail"]
+        assert "aino" in data["detail"]
+        assert "出现了 3 次" in data["detail"]
+
 
 class TestCreateConversationFinnishDiscussionOpeningDialogue:
     """Tests for automatic opening dialogue when creating Finnish discussion conversation."""

@@ -644,6 +644,24 @@ async def create_conversation(req: CreateConversationReq):
     persona_ids = [p.strip().lower() for p in req.persona_ids if p.strip()]
     if not persona_ids:
         persona_ids = DEFAULT_PERSONAS.copy()  # 默认使用芬兰学生双人组合
+
+    # 检测重复的 persona ID
+    seen = set()
+    duplicates = []
+    for pid in persona_ids:
+        if pid in seen:
+            duplicates.append(pid)
+        seen.add(pid)
+    if duplicates:
+        # 统计每个重复 ID 的出现次数
+        from collections import Counter
+        counts = Counter(persona_ids)
+        dup_details = ", ".join(f"{pid} 出现了 {counts[pid]} 次" for pid in set(duplicates))
+        raise HTTPException(
+            400,
+            detail=f"检测到重复的聊天对象: {dup_details}",
+        )
+
     invalid = [p for p in persona_ids if p not in personas.PERSONAS]
     if invalid:
         raise HTTPException(
