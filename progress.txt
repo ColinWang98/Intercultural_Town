@@ -1,0 +1,19 @@
+## Codebase Patterns
+- FastAPI 后端架构：Main.py 包含所有端点
+- Persona 配置：personas.py 定义所有 agent 和模型
+- 状态机架构：small_talk -> religion_deep/allergy_deep -> wrap_up -> finished
+- 对话历史：CONVERSATIONS 字典存储会话和消息
+- 测试模式：使用 AsyncMock patch _generate_group_initial_messages 和 _run_chat_round 避免 Ollama 调用
+
+## 2026-02-07 - US-001
+- 在 POST /conversations 端点添加了重复 persona ID 检测逻辑
+- 使用 Counter 统计重复 ID 的出现次数，生成友好的错误消息
+- 添加了两个测试用例验证重复检测功能
+- Files changed: Main.py, tests/test_main_api.py
+
+**Learnings for future iterations:**
+- 该项目使用 pytest 和 FastAPI TestClient 进行测试
+- 测试中使用 AsyncMock 来避免调用实际的 LLM（Ollama）
+- HTTPException 用于返回 API 错误，detail 字段包含错误消息
+- 中文错误消息与现有代码风格保持一致
+---
