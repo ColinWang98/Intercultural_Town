@@ -99,10 +99,7 @@ class ConversationSummary(BaseModel):
 CONVERSATIONS: dict[str, dict] = {}
 
 # 会话状态管理：id -> {
-#     "phase": "small_talk" | "religion_deep" | "allergy_deep" | "wrap_up" | "finished",
-#     "religion_discussed": bool,
-#     "allergy_discussed": bool,
-#     "sub_agent_turns": int,  # 子代理讨论轮数计数
+#     "phase": "small_talk" | "finished",
 # }
 CONVERSATION_STATES: dict[str, dict] = {}
 
@@ -287,32 +284,6 @@ def _session_id(persona_id: str, conversation_id: str | None = None) -> str:
     return f"default_{persona_id}"
 
 
-def _detect_focus_flags(user_content: str) -> tuple[bool, bool]:
-    """检测玩家当前消息是否主动提到宗教/过敏相关话题。
-
-    只检测玩家主动提出的话题，不扫描历史消息。
-    
-    Returns:
-        (has_religion_focus, has_allergy_focus)
-    """
-    religion_keywords = [
-        "宗教", "清真", "穆斯林", "伊斯兰", "犹太", "洁食", 
-        "halal", "kosher", "斋月", "素食", "纯素", "vegan",
-        "信仰", "禁忌", "不吃猪", "不吃牛",
-    ]
-    allergy_keywords = [
-        "过敏", "花生", "坚果", "海鲜", "虾", "蟹", "贝类",
-        "乳糖", "牛奶", "奶制品", "麸质", "gluten", "小麦",
-        "不耐受", "敏感",
-    ]
-
-    content = user_content.lower()
-    has_religion_focus = any(kw in content for kw in religion_keywords)
-    has_allergy_focus = any(kw in content for kw in allergy_keywords)
-
-    return has_religion_focus, has_allergy_focus
-
-
 async def _get_or_create_session(runner, app_name: str, session_id: str):
     """获取或创建指定 persona 的 session。"""
     session = await runner.session_service.get_session(
@@ -345,9 +316,6 @@ async def _run_chat_round(conversation_id: str, persona_ids: list[str], user_con
     if conversation_id not in CONVERSATION_STATES:
         CONVERSATION_STATES[conversation_id] = {
             "phase": "small_talk",
-            "religion_discussed": False,
-            "allergy_discussed": False,
-            "sub_agent_turns": 0,
         }
 
     state = CONVERSATION_STATES[conversation_id]
@@ -363,114 +331,26 @@ async def _run_chat_round(conversation_id: str, persona_ids: list[str], user_con
     # 获取当前状态
     phase = state["phase"]
 
-    # === 状态机逻辑 ===
+    # === 状态机逻辑（简化版） ===
     if phase == "small_talk":
-        # 只检测玩家当前消息是否主动提到相关话题
-        has_religion, has_allergy = _detect_focus_flags(user_content)
-
-        if has_religion and not state["religion_discussed"]:
-            state["phase"] = "religion_deep"
-            state["sub_agent_turns"] = 0
-            phase = "religion_deep"  # 立即更新当前 phase
-            print(f"[STATE] {conversation_id}: small_talk -> religion_deep")
-        elif has_allergy and not state["allergy_discussed"]:
-            state["phase"] = "allergy_deep"
-            state["sub_agent_turns"] = 0
-            phase = "allergy_deep"  # 立即更新当前 phase
-            print(f"[STATE] {conversation_id}: small_talk -> allergy_deep")
-        elif state["religion_discussed"] and state["allergy_discussed"]:
-            state["phase"] = "wrap_up"
-            phase = "wrap_up"  # 立即更新当前 phase
-            print(f"[STATE] {conversation_id}: small_talk -> wrap_up")
-        else:
-            # 继续闲聊
-            pass
-
-    elif phase == "religion_deep":
-        state["sub_agent_turns"] += 1
-        # 3-4轮后返回
-        if state["sub_agent_turns"] >= 3:
-            state["religion_discussed"] = True
-            if state["allergy_discussed"]:
-                state["phase"] = "wrap_up"
-            else:
-                state["phase"] = "small_talk"
-            print(f"[STATE] {conversation_id}: religion_deep -> {state['phase']}")
-
-    elif phase == "allergy_deep":
-        state["sub_agent_turns"] += 1
-        # 3-4轮后返回
-        if state["sub_agent_turns"] >= 3:
-            state["allergy_discussed"] = True
-            if state["religion_discussed"]:
-                state["phase"] = "wrap_up"
-            else:
-                state["phase"] = "small_talk"
-            print(f"[STATE] {conversation_id}: allergy_deep -> {state['phase']}")
-
-    elif phase == "wrap_up":
-        # 检测玩家是否确认
+        # 检测玩家是否想要结束对话
         user_lower = user_content.lower()
-        affirmative_words = ["是", "好了", "可以", "没问题", "考虑清楚了", "没了", "没有"]
-        if any(word in user_lower for word in affirmative_words):
+        end_words = ["再见", "拜拜", "结束", "好了", "没问题", "可以了"]
+        if any(word in user_lower for word in end_words):
             state["phase"] = "finished"
-            print(f"[STATE] {conversation_id}: wrap_up -> finished")
+            phase = "finished"
+            print(f"[STATE] {conversation_id}: small_talk -> finished")
 
     # === 根据状态调用对应的 Agent ===
     if phase == "small_talk":
-        # 芬兰学生闲聊
+        # 芬兰学生闲聊（支持动态 persona）
         return await _finnish_students_respond(conversation_id, user_content, messages, dynamic_personas_map)
-    elif phase == "religion_deep":
-        # 宗教专家附身 Mikko
-        expert_reply = await _expert_respond(
-            conversation_id, user_content, messages,
-            expert_id="religion_expert",
-            expert_display_name="Mikko",
-            dynamic_personas_map=dynamic_personas_map,
-        )
-        # Aino 可以补充（可选）
-        aino_dynamic = dynamic_personas_map.get("aino")
-        aino_reply = await _call_agent(
-            conversation_id, "aino",
-            f"【对话记录】\n{_format_conversation_history(messages)}\n\nMikko 刚刚说了关于宗教饮食禁忌的内容：{expert_reply}\n\n玩家说：{user_content}\n\n请简短回应或补充，1句话即可。",
-            messages,
-            aino_dynamic,
-        )
-        if aino_reply:
-            aino_name = dynamic_personas_map.get("aino", DynamicPersona(name="Aino")).name
-            return f"{expert_reply}\n\n{aino_name}: {aino_reply}"
-        return expert_reply
-    elif phase == "allergy_deep":
-        # 过敏专家附身 Aino
-        expert_reply = await _expert_respond(
-            conversation_id, user_content, messages,
-            expert_id="allergy_expert",
-            expert_display_name="Aino",
-            dynamic_personas_map=dynamic_personas_map,
-        )
-        # Mikko 可以补充（可选）
-        mikko_dynamic = dynamic_personas_map.get("mikko")
-        mikko_reply = await _call_agent(
-            conversation_id, "mikko",
-            f"【对话记录】\n{_format_conversation_history(messages)}\n\nAino 刚刚说了关于食物过敏的内容：{expert_reply}\n\n玩家说：{user_content}\n\n请简短回应或补充，1句话即可。",
-            messages,
-            mikko_dynamic,
-        )
-        if mikko_reply:
-            mikko_name = dynamic_personas_map.get("mikko", DynamicPersona(name="Mikko")).name
-            return f"{expert_reply}\n\n{mikko_name}: {mikko_reply}"
-        return expert_reply
-    elif phase == "wrap_up":
-        # 芬兰学生收尾
-        reply = await _finnish_students_respond(conversation_id, user_content, messages, dynamic_personas_map)
-        # 如果已进入 finished，调用 Observer
-        if state["phase"] == "finished":
-            observer_reply = await _call_observer(conversation_id, messages)
-            return f"{reply}\n\n{observer_reply}"
-        return reply
     elif phase == "finished":
-        # 已完成，只返回 Observer 总结
-        return await _call_observer(conversation_id, messages)
+        # 调用 Observer 生成总结
+        observer_reply = await _call_observer(conversation_id, messages)
+        # 学生也可以最后说一句话
+        final_reply = await _finnish_students_respond(conversation_id, user_content, messages, dynamic_personas_map)
+        return f"{final_reply}\n\n{observer_reply}"
 
     return "（对话状态异常，请重启会话）"
 
@@ -630,58 +510,6 @@ async def _finnish_students_respond(
             replies.append(f"{persona_name}: {reply}")
 
     return "\n\n".join(replies) if replies else "（Mikko 和 Aino 暂时不知道说什么）"
-
-
-async def _expert_respond(
-    conversation_id: str,
-    user_content: str,
-    messages: list[dict],
-    expert_id: str,
-    expert_display_name: str,
-    dynamic_personas_map: dict[str, DynamicPersona] | None = None,
-) -> str:
-    """Expert 附身模式：专家以角色身份回应玩家。
-
-    Args:
-        conversation_id: 会话 ID
-        user_content: 玩家消息
-        messages: 对话历史
-        expert_id: 专家 persona ID（如 "religion_expert"）
-        expert_display_name: 显示名称（如 "Mikko"）
-        dynamic_personas_map: 动态 persona 映射表（可选）
-
-    Returns:
-        专家的回复（带名字前缀）
-    """
-    if dynamic_personas_map is None:
-        dynamic_personas_map = {}
-
-    history_text = _format_conversation_history(messages)
-
-    prompt_parts = []
-    if history_text:
-        prompt_parts.append(f"【对话记录】\n{history_text}")
-
-    prompt_parts.append(f"玩家说：{user_content}")
-    prompt_parts.append("请用你的专业知识回应，2-3句话即可。")
-
-    prompt = "\n\n".join(prompt_parts)
-
-    # 检查是否有对应的动态 persona（用于角色附身时的性格特征）
-    dynamic_persona = dynamic_personas_map.get(expert_display_name.lower())
-
-    # 调用专家 Agent
-    reply = await _call_agent(conversation_id, expert_id, prompt, messages, dynamic_persona)
-
-    if reply:
-        # 检查是否包含 [DONE] 标记（专家认为讨论完成）
-        if "[DONE]" in reply:
-            reply = reply.replace("[DONE]", "").strip()
-            # 标记讨论完成（通过返回特殊格式让调用者处理）
-        # 返回带名字的回复
-        return f"{expert_display_name}: {reply}"
-
-    return f"（{expert_display_name} 正在思考...）"
 
 
 async def _call_observer(conversation_id: str, messages: list[dict]) -> str:

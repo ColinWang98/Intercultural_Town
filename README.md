@@ -46,14 +46,18 @@ python test_dynamic_persona_complete.py
 **预定义 Persona**（在 `personas.py` 中配置）：
 - `mikko`：芬兰学生（男），外向开朗
 - `aino`：芬兰学生（女），文静细心
-- `religion_expert`：宗教饮食专家
-- `allergy_expert`：食物过敏专家
 - `observer`：对话观察者，用于总结
 
 **动态 Persona**（API 请求中定义）：
-- 可在创建会话时动态添加任意角色
+- 可在创建会话时动态添加**任意角色**
 - 支持完整的性格、性别、兴趣等配置
 - 无需修改后端代码
+- 完全灵活的多人对话系统
+
+**示例动态 Persona**：
+- 自定义专家（宗教、过敏、营养等）
+- 自定义角色（老师、学生、家长等）
+- 任何你需要的角色！
 
 ---
 
