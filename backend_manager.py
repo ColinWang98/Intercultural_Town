@@ -1,6 +1,6 @@
 """
-Backend Manager - 图形化管理界面
-功能：端口管理、模型切换、文档浏览、后端控制
+Backend Manager - 后端启动管理工具
+提供图形界面来管理 Backend 服务器的启动、停止和配置
 """
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
@@ -16,61 +16,59 @@ from dotenv import load_dotenv
 class BackendManager:
     def __init__(self, root):
         self.root = root
-        self.root.title("Backend Manager v2.1")
+        self.root.title("Backend Manager v2.2")
         self.root.geometry("1000x700")
 
-        # 后端进程
+        # 进程管理
         self.backend_process = None
         self.is_running = False
 
-        # 加载环境变量
-        load_dotenv()
+        # 环境配置
+        load_dotenv(override=True)
 
-        # 创建界面
+        # 创建界面组件
         self.create_widgets()
 
-        # 初始化状态
+        # 更新状态显示
         self.update_status()
 
     def create_widgets(self):
-        # === 顶部：标题栏 ===
+        # === 顶部状态栏 ===
         header = ttk.Frame(self.root, padding=10)
         header.pack(fill='x')
 
         title = ttk.Label(header, text="Backend Manager", font=("Arial", 16, "bold"))
         title.pack(side='left')
 
-        self.status_label = ttk.Label(header, text="● 未连接", foreground="red", font=("Arial", 12))
+        self.status_label = ttk.Label(header, text="状态: 未启动", foreground="red", font=("Arial", 12))
         self.status_label.pack(side='right')
 
-        # === 主要内容区 ===
+        # === 主控制面板 ===
         main_frame = ttk.Frame(self.root)
         main_frame.pack(fill='both', expand=True, padx=10, pady=5)
 
-        # 左侧面板
+        # 左侧控制面板
         left_panel = ttk.Frame(main_frame, width=300)
         left_panel.pack(side='left', fill='y', padx=(0, 5))
 
-        # 右侧面板（文档浏览）
+        # 右侧文档面板
         right_panel = ttk.Frame(main_frame)
         right_panel.pack(side='right', fill='both', expand=True)
 
-        # === 左侧：控制面板 ===
-
-        # 1. 后端控制
+        # === 1. 后端控制 ===
         backend_frame = ttk.LabelFrame(left_panel, text="后端控制", padding=10)
         backend_frame.pack(fill='x', pady=(0, 10))
 
-        self.btn_start = ttk.Button(backend_frame, text="▶ 启动后端", command=self.start_backend)
+        self.btn_start = ttk.Button(backend_frame, text="启动后端", command=self.start_backend)
         self.btn_start.pack(fill='x', pady=2)
 
-        self.btn_stop = ttk.Button(backend_frame, text="⏹ 停止后端", command=self.stop_backend, state='disabled')
+        self.btn_stop = ttk.Button(backend_frame, text="停止后端", command=self.stop_backend, state='disabled')
         self.btn_stop.pack(fill='x', pady=2)
 
-        self.btn_test = ttk.Button(backend_frame, text="🔍 测试连接", command=self.test_connection)
+        self.btn_test = ttk.Button(backend_frame, text="测试连接", command=self.test_connection)
         self.btn_test.pack(fill='x', pady=2)
 
-        # 2. 端口管理
+        # === 2. 端口管理 ===
         port_frame = ttk.LabelFrame(left_panel, text="端口管理 (8000)", padding=10)
         port_frame.pack(fill='x', pady=(0, 10))
 
@@ -80,17 +78,23 @@ class BackendManager:
         self.port_status = ttk.Label(port_frame, text="未检查", foreground="gray")
         self.port_status.pack(pady=5)
 
-        # 3. 模型配置
+        # === 3. 模型选择 ===
         model_frame = ttk.LabelFrame(left_panel, text="模型配置", padding=10)
         model_frame.pack(fill='x', pady=(0, 10))
 
-        # 模型选择
         ttk.Label(model_frame, text="当前模型:").pack(anchor='w')
-        self.model_var = tk.StringVar(value=os.getenv('USE_AZURE', 'false'))
+
+        # 读取当前模型配置
+        provider = os.getenv('MODEL_PROVIDER', 'ollama')
+        if os.getenv('USE_AZURE', '').lower() == 'true':
+            provider = 'azure'
+        self.model_var = tk.StringVar(value=provider)
 
         model_options = [
-            ("Azure OpenAI (gpt-5-nano)", "true"),
-            ("本地 Ollama", "false"),
+            ("本地 Ollama (qwen3:8b)", "ollama"),
+            ("Azure OpenAI (gpt-4o)", "azure"),
+            ("OpenRouter (stepfun/step-3.5-flash:free)", "openrouter"),
+            ("智谱 AI GLM-4.6v", "glm"),
         ]
 
         for text, value in model_options:
@@ -102,9 +106,9 @@ class BackendManager:
                 command=self.on_model_change
             ).pack(anchor='w', pady=2)
 
-        ttk.Button(model_frame, text="💾 保存配置", command=self.save_model_config).pack(fill='x', pady=(10, 0))
+        ttk.Button(model_frame, text="保存配置", command=self.save_model_config).pack(fill='x', pady=(10, 0))
 
-        # 当前配置显示
+        # === 4. 配置查看 ===
         config_frame = ttk.LabelFrame(left_panel, text="当前配置", padding=10)
         config_frame.pack(fill='x', pady=(0, 10))
 
@@ -112,14 +116,14 @@ class BackendManager:
         self.config_text.pack(fill='x')
         self.update_config_display()
 
-        # 4. 日志输出
+        # === 5. 日志输出 ===
         log_frame = ttk.LabelFrame(left_panel, text="运行日志", padding=10)
         log_frame.pack(fill='both', expand=True)
 
         self.log_text = scrolledtext.ScrolledText(log_frame, height=10, width=30, font=("Consolas", 8))
         self.log_text.pack(fill='both', expand=True)
 
-        # === 右侧：文档浏览 ===
+        # === 右侧文档查看器 ===
         doc_frame = ttk.LabelFrame(right_panel, text="文档浏览", padding=10)
         doc_frame.pack(fill='both', expand=True)
 
@@ -140,18 +144,18 @@ class BackendManager:
         doc_content_frame = ttk.Frame(doc_frame)
         doc_content_frame.pack(fill='both', expand=True)
 
-        ttk.Button(doc_content_frame, text="📖 在浏览器中打开", command=self.open_in_browser).pack(anchor='e', pady=(0, 5))
+        ttk.Button(doc_content_frame, text="在浏览器中打开", command=self.open_in_browser).pack(anchor='e', pady=(0, 5))
 
         self.doc_content = scrolledtext.ScrolledText(doc_content_frame, wrap='word', font=("Consolas", 10))
         self.doc_content.pack(fill='both', expand=True)
 
-        # === 底部：状态栏 ===
+        # === 底部状态栏 ===
         status_frame = ttk.Frame(self.root, padding=5)
         status_frame.pack(fill='x', side='bottom')
 
-        self.log_message("Backend Manager 已启动", "info")
+        self.log_message("Backend Manager 已就绪", "info")
 
-    # === 后端控制 ===
+    # === 后端控制方法 ===
     def start_backend(self):
         if self.is_running:
             messagebox.showwarning("警告", "后端已在运行中")
@@ -161,20 +165,35 @@ class BackendManager:
 
         def run_backend():
             try:
+                # 设置 UTF-8 编码环境变量
+                env = os.environ.copy()
+                env['PYTHONIOENCODING'] = 'utf-8'
+
                 self.backend_process = subprocess.Popen(
-                    ['python', 'Main.py'],
+                    ['python', '-u', 'Main.py'],  # -u 启用无缓冲输出
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1
+                    text=False,  # 使用字符串而不是字节
+                    bufsize=0,
+                    env=env
                 )
 
                 self.is_running = True
                 self.root.after(0, self.on_backend_started)
 
-                # 实时读取日志
-                for line in self.backend_process.stdout:
-                    self.root.after(0, lambda l=line: self.log_message(l, 'backend'))
+                # 读取后端输出
+                while True:
+                    line = self.backend_process.stdout.readline()
+                    if not line:
+                        break
+                    try:
+                        # 尝试 UTF-8 解码，失败则回退到 GBK
+                        text = line.decode('utf-8', errors='replace')
+                    except:
+                        text = line.decode('gbk', errors='replace')
+
+                    if text:
+                        self.root.after(0, lambda l=text: self.log_message(l.rstrip(), 'backend'))
 
                 self.backend_process.wait()
                 self.root.after(0, self.on_backend_stopped)
@@ -198,8 +217,8 @@ class BackendManager:
     def on_backend_started(self):
         self.btn_start.config(state='disabled')
         self.btn_stop.config(state='normal')
-        self.status_label.config(text="● 运行中", foreground="green")
-        self.log_message("后端已启动", "success")
+        self.status_label.config(text="状态: 运行中", foreground="green")
+        self.log_message("后端启动成功", "success")
         self.update_status()
 
     def on_backend_stopped(self):
@@ -207,7 +226,7 @@ class BackendManager:
         self.backend_process = None
         self.btn_start.config(state='normal')
         self.btn_stop.config(state='disabled')
-        self.status_label.config(text="● 未连接", foreground="red")
+        self.status_label.config(text="状态: 未启动", foreground="red")
         self.log_message("后端已停止", "info")
         self.update_status()
 
@@ -217,20 +236,21 @@ class BackendManager:
         try:
             response = requests.get("http://127.0.0.1:8000/", timeout=5)
             if response.status_code == 200:
-                self.log_message("连接成功！后端正常响应", "success")
-                messagebox.showinfo("测试结果", "✅ 连接成功！")
+                self.log_message("连接测试成功", "success")
+                messagebox.showinfo("成功", "后端连接正常")
             else:
                 self.log_message(f"连接失败: HTTP {response.status_code}", "error")
-                messagebox.showerror("测试结果", f"❌ 连接失败: HTTP {response.status_code}")
+                messagebox.showerror("错误", f"后端连接失败: HTTP {response.status_code}")
         except requests.exceptions.ConnectionError:
-            self.log_message("无法连接到后端，请确认后端已启动", "error")
-            messagebox.showerror("测试结果", "❌ 无法连接到后端\n请确认后端已启动")
+            self.log_message("连接失败", "error")
+            messagebox.showerror("错误", "无法连接到后端\n请确保后端已启动")
         except Exception as e:
-            self.log_message(f"连接错误: {e}", "error")
-            messagebox.showerror("测试结果", f"❌ 连接错误: {e}")
+            self.log_message(f"测试失败: {e}", 'error')
+            messagebox.showerror("错误", f"连接测试出错: {e}")
 
-    # === 端口管理 ===
+    # === 端口管理方法 ===
     def check_port(self):
+        """检查端口 8000 占用情况"""
         try:
             result = subprocess.run(
                 ['netstat', '-ano', '|', 'findstr', ':8000'],
@@ -244,20 +264,21 @@ class BackendManager:
                 listening_lines = [l for l in lines if 'LISTENING' in l]
 
                 if listening_lines:
-                    self.port_status.config(text=f"占用 ({len(listening_lines)} 个进程)", foreground="orange")
-                    self.log_message(f"端口 8000 被占用:\n{result.stdout}", 'info')
+                    self.port_status.config(text=f"已占用 ({len(listening_lines)} 个进程)", foreground="orange")
+                    self.log_message(f"端口 8000 已被占用:\n{result.stdout}", 'info')
                 else:
-                    self.port_status.config(text="空闲", foreground="green")
-                    self.log_message("端口 8000 空闲", "success")
+                    self.port_status.config(text="端口空闲", foreground="green")
+                    self.log_message("端口 8000 空闲可用", "success")
             else:
-                self.port_status.config(text="空闲", foreground="green")
-                self.log_message("端口 8000 空闲", "success")
+                self.port_status.config(text="端口空闲", foreground="green")
+                self.log_message("端口 8000 空闲可用", "success")
 
         except Exception as e:
             self.port_status.config(text="检查失败", foreground="red")
-            self.log_message(f"检查端口失败: {e}", 'error')
+            self.log_message(f"端口检查出错: {e}", 'error')
 
     def clear_port(self):
+        """清理端口 8000"""
         self.log_message("正在清理端口 8000...", "info")
 
         try:
@@ -278,8 +299,8 @@ class BackendManager:
                         pids.add(pid)
 
             if not pids:
-                self.log_message("没有发现占用端口的进程", "info")
-                messagebox.showinfo("清理结果", "端口 8000 未被占用")
+                self.log_message("没有找到占用端口的进程", "info")
+                messagebox.showinfo("提示", "端口 8000 未被占用")
                 return
 
             # 终止进程
@@ -294,25 +315,33 @@ class BackendManager:
 
             if killed:
                 self.log_message(f"已终止进程: {', '.join(killed)}", "success")
-                messagebox.showinfo("清理结果", f"✅ 已终止 {len(killed)} 个进程")
-                self.port_status.config(text="已清理", foreground="green")
+                messagebox.showinfo("成功", f"已清理 {len(killed)} 个占用进程")
+                self.port_status.config(text="端口已释放", foreground="green")
             else:
-                self.log_message("未能终止任何进程", "error")
-                messagebox.showwarning("清理结果", "未能终止进程")
+                self.log_message("清理失败", "error")
+                messagebox.showwarning("警告", "未能清理端口")
 
         except Exception as e:
-            self.log_message(f"清理端口失败: {e}", 'error')
-            messagebox.showerror("清理结果", f"❌ 清理失败: {e}")
+            self.log_message(f"清理失败: {e}", 'error')
+            messagebox.showerror("错误", f"清理端口时出错: {e}")
 
-    # === 模型配置 ===
+    # === 模型配置方法 ===
     def on_model_change(self):
-        model_type = "Azure OpenAI" if self.model_var.get() == "true" else "本地 Ollama"
-        self.log_message(f"切换到: {model_type}", "info")
+        """模型选择改变时的回调"""
+        provider_map = {
+            'ollama': '本地 Ollama',
+            'azure': 'Azure OpenAI',
+            'openrouter': 'OpenRouter',
+            'glm': '智谱 AI GLM-4.6v'
+        }
+        model_type = provider_map.get(self.model_var.get(), self.model_var.get())
+        self.log_message(f"切换模型: {model_type}", "info")
         self.update_config_display()
 
     def save_model_config(self):
+        """保存模型配置到 .env 文件"""
         try:
-            # 读取当前 .env
+            # 读取现有 .env 文件
             env_path = Path('.env')
 
             if not env_path.exists():
@@ -320,59 +349,82 @@ class BackendManager:
                 return
 
             with open(env_path, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
+                content = f.read()
+
+            provider = self.model_var.get()
+
+            # 更新 MODEL_PROVIDER
+            import re
+            if 'MODEL_PROVIDER=' in content:
+                content = re.sub(r'MODEL_PROVIDER=.*', f'MODEL_PROVIDER={provider}', content)
+            else:
+                content = f'MODEL_PROVIDER={provider}\n' + content
 
             # 更新 USE_AZURE
-            updated = []
-            for line in lines:
-                if line.startswith('USE_AZURE='):
-                    updated.append(f'USE_AZURE={self.model_var.get()}\n')
-                else:
-                    updated.append(line)
+            use_azure = 'true' if provider == 'azure' else 'false'
+            if 'USE_AZURE=' in content:
+                content = re.sub(r'USE_AZURE=.*', f'USE_AZURE={use_azure}', content)
+            else:
+                content += f'\nUSE_AZURE={use_azure}\n'
 
-            # 写回文件
+            # 保存配置
             with open(env_path, 'w', encoding='utf-8') as f:
-                f.writelines(updated)
+                f.write(content)
 
-            self.log_message("配置已保存，重启后端生效", "success")
-            messagebox.showinfo("保存成功", "✅ 配置已保存\n请重启后端使配置生效")
+            self.log_message(f"配置已保存: {provider}", "success")
+            messagebox.showinfo("成功", f"模型配置已保存为: {provider}\n请重启后端生效")
             self.update_config_display()
 
         except Exception as e:
             self.log_message(f"保存配置失败: {e}", 'error')
-            messagebox.showerror("保存失败", f"❌ 保存配置失败: {e}")
+            messagebox.showerror("错误", f"保存配置时出错: {e}")
 
     def update_config_display(self):
-        """更新配置显示"""
+        """更新配置显示区域"""
         load_dotenv()
 
-        use_azure = os.getenv('USE_AZURE', 'false')
-        endpoint = os.getenv('AZURE_OPENAI_ENDPOINT', '未设置')
-        ollama_base = os.getenv('OLLAMA_API_BASE', '未设置')
+        provider = os.getenv('MODEL_PROVIDER', 'ollama')
+        if os.getenv('USE_AZURE', '').lower() == 'true':
+            provider = 'azure'
 
         self.config_text.delete('1.0', 'end')
 
-        if use_azure == 'true':
-            config = f"""模型: Azure OpenAI
+        if provider == 'azure':
+            endpoint = os.getenv('AZURE_OPENAI_ENDPOINT', '未设置')
+            config = f"""模型提供商: Azure OpenAI
 端点: {endpoint}
 版本: {os.getenv('AZURE_OPENAI_API_VERSION', '未设置')}
-状态: {'已配置' if endpoint != '未设置' else '未配置'}"""
+API 密钥: {'已设置' if endpoint != '未设置' else '未设置'}"""
+        elif provider == 'openrouter':
+            key = os.getenv('OPENROUTER_API_KEY', '')
+            key_status = '已设置' if key else '未设置 (需要 OPENROUTER_API_KEY)'
+            config = f"""模型提供商: OpenRouter
+模型: stepfun/step-3.5-flash:free
+API 密钥: {key_status}"""
+        elif provider == 'glm':
+            key = os.getenv('GLM_API_KEY', '')
+            key_status = '已设置' if key else '未设置 (需要 GLM_API_KEY)'
+            config = f"""模型提供商: 智谱 AI
+端点: https://open.bigmodel.cn/api/paas/v4/
+API 密钥: {key_status}"""
         else:
-            config = f"""模型: 本地 Ollama
+            ollama_base = os.getenv('OLLAMA_API_BASE', '未设置')
+            config = f"""模型提供商: 本地 Ollama
 端点: {ollama_base}
-状态: {'已配置' if ollama_base != '未设置' else '未配置'}"""
+模型: qwen3:8b
+状态: {'运行中' if ollama_base != '未设置' else '未设置'}"""
 
         self.config_text.insert('1.0', config)
 
-    # === 文档浏览 ===
+    # === 文档管理方法 ===
     def load_documents(self):
-        """加载文档列表"""
+        """加载可用的文档列表"""
         docs = [
-            ("README.md", "项目主文档"),
-            ("README_ARCHITECTURE.md", "项目逻辑架构"),
-            ("README_GAME_OVERVIEW.md", "整体架构说明"),
-            ("FOLDER_STRUCTURE.md", "文件夹结构"),
-            ("MAIN_ARCHITECTURE.md", "Main.py 架构详解"),
+            ("README.md", "项目说明"),
+            ("README_ARCHITECTURE.md", "架构文档"),
+            ("README_GAME_OVERVIEW.md", "游戏概述"),
+            ("FOLDER_STRUCTURE.md", "目录结构"),
+            ("MAIN_ARCHITECTURE.md", "Main.py 架构"),
         ]
 
         self.documents = {}
@@ -382,7 +434,7 @@ class BackendManager:
                 self.doc_listbox.insert('end', title)
 
     def on_doc_select(self, event):
-        """文档选择事件"""
+        """文档列表选择事件"""
         selection = self.doc_listbox.curselection()
         if not selection:
             return
@@ -397,16 +449,16 @@ class BackendManager:
 
                 self.doc_content.delete('1.0', 'end')
                 self.doc_content.insert('1.0', content)
-                self.log_message(f"已加载: {filename}", "info")
+                self.log_message(f"已加载文档: {filename}", "info")
 
             except Exception as e:
                 self.log_message(f"加载文档失败: {e}", 'error')
 
     def open_in_browser(self):
-        """在浏览器中打开文档"""
+        """在浏览器中打开当前文档"""
         selection = self.doc_listbox.curselection()
         if not selection:
-            messagebox.showwarning("提示", "请先选择一个文档")
+            messagebox.showwarning("警告", "请先选择一个文档")
             return
 
         title = self.doc_listbox.get(selection[0])
@@ -416,40 +468,42 @@ class BackendManager:
             try:
                 file_path = Path(filename).resolve()
                 webbrowser.open(f"file:///{file_path}")
-                self.log_message(f"已在浏览器中打开: {filename}", "success")
+                self.log_message(f"已在浏览器打开: {filename}", "success")
             except Exception as e:
-                self.log_message(f"打开失败: {e}", 'error')
+                self.log_message(f"打开文档失败: {e}", 'error')
 
-    # === 通用功能 ===
+    # === 日志和状态方法 ===
     def log_message(self, message, level='info'):
-        """添加日志"""
+        """添加日志消息"""
         timestamp = time.strftime("%H:%M:%S")
 
-        # 根据级别设置颜色标签
+        # 日志标签
         tags = {
-            'info': '[INFO]',
-            'success': '[OK]',
-            'error': '[ERROR]',
-            'backend': '[BACKEND]'
+            'info': '[信息]',
+            'success': '[成功]',
+            'error': '[错误]',
+            'backend': '[后端]'
         }
 
-        tag = tags.get(level, '[LOG]')
+        tag = tags.get(level, '[日志]')
         log_line = f"{timestamp} {tag} {message}\n"
 
         self.log_text.insert('end', log_line)
         self.log_text.see('end')
 
     def update_status(self):
-        """更新状态"""
+        """更新状态标签"""
         if self.is_running:
-            self.status_label.config(text="● 运行中", foreground="green")
+            self.status_label.config(text="状态: 运行中", foreground="green")
         else:
-            self.status_label.config(text="● 未连接", foreground="red")
+            self.status_label.config(text="状态: 未启动", foreground="red")
+
 
 def main():
     root = tk.Tk()
     app = BackendManager(root)
     root.mainloop()
+
 
 if __name__ == "__main__":
     main()

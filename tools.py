@@ -1,25 +1,25 @@
 # -*- coding: utf-8 -*-
-"""AgentTool 缓存和管理模块。
+"""AgentTool [OK]
 
-用于在多 Agent 协作场景中管理所有 Agent 的 AgentTool 实例。
+[OK] Agent [OK] Agent [OK] AgentTool [OK]
 """
 
 from google.adk.tools.agent_tool import AgentTool
 from google.adk.agents.llm_agent import Agent
 
 
-# 全局 AgentTool 缓存
+# [OK] AgentTool [OK]
 # key: persona_id (e.g., "french_student_male")
-# value: AgentTool 实例
+# value: AgentTool [OK]
 AGENT_TOOLS: dict[str, AgentTool] = {}
 
 
 def register_agent_tool(pid: str, agent: Agent) -> None:
-    """注册一个 Agent 为 AgentTool。
+    """[OK] Agent [OK] AgentTool[OK]
 
     Args:
-        pid: Persona ID（如 "french_student_male"）
-        agent: 要包装的 Agent 实例
+        pid: Persona ID[OK] "french_student_male"[OK]
+        agent: [OK] Agent [OK]
 
     Example:
         >>> register_agent_tool("french_student_male", my_agent)
@@ -31,19 +31,19 @@ def register_agent_tool(pid: str, agent: Agent) -> None:
 
 
 def get_agent_tools(exclude_pid: str | None = None) -> list[AgentTool]:
-    """获取所有 AgentTool，可选排除指定 persona。
+    """[OK] AgentTool[OK] persona[OK]
 
     Args:
-        exclude_pid: 要排除的 persona ID（如 "french_student_male"）
-                    如果为 None，返回所有工具
+        exclude_pid: [OK] persona ID[OK] "french_student_male"[OK]
+                    [OK] None[OK]
 
     Returns:
-        AgentTool 列表
+        AgentTool [OK]
 
     Example:
-        >>> # 获取除了法国男学生外的所有工具
+        >>> # [OK]
         >>> tools = get_agent_tools(exclude_pid="french_student_male")
-        >>> # 获取所有工具
+        >>> # [OK]
         >>> all_tools = get_agent_tools()
     """
     if exclude_pid is None:
@@ -53,7 +53,7 @@ def get_agent_tools(exclude_pid: str | None = None) -> list[AgentTool]:
 
 
 def clear_agent_tools() -> None:
-    """清空所有 AgentTool 缓存（用于测试或重置）。
+    """[OK] AgentTool [OK]
 
     Example:
         >>> clear_agent_tools()

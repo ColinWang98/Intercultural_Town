@@ -1,0 +1,8 @@
+# py.typed marker
+#
+# This file declares that the "backend" package supports static type checking.
+# It is used by type checkers like mypy, pyright, etc. to understand
+# that this package has type annotations or stubs available.
+#
+# Marker format: PEP 561
+# https://peps.python.org/pep-0561/
