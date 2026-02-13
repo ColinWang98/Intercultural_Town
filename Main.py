@@ -63,6 +63,18 @@ class PersonaItem(BaseModel):
     name: str
 
 
+@app.get("/personas", response_model=List[PersonaItem])
+def list_personas():
+    """获取所有可用 persona 列表"""
+    personas_list = []
+    
+    # 添加预定义 personas
+    for pid, info in personas.PERSONAS.items():
+        personas_list.append(PersonaItem(id=pid, name=info.get("name", pid)))
+    
+    return personas_list
+
+
 # ---------- RESTful: * ----------
 
 class DynamicPersona(BaseModel):
@@ -289,15 +301,14 @@ def _strip_thinking(text: str) -> str:
         lines = lines[dialogue_start_idx:]
         return "\n".join(lines).strip()
     
-    # *
-    # *
+    # 移除常见思考前缀
     thinking_prefixes = (
-        "*", "*", "*", "*", "*",
-        "*", "*", "*", "OK*", "Ok*", "ok*",
-        "*", "*", "*", "*",
-        "*", "*", "*", "*", "*",
-        "*", "*", "*", "*",
-        "*", "*", "*", "*", "*",
+        "思考：", "我需要", "我应该", "用户希望", "让我",
+        "首先", "第一步", "OK，", "Ok，", "ok，",
+        "好的", "好的，", "嗯", "好的",
+        "我来", "我认为", "我觉得", "我想", "注意",
+        "重要", "关键", "这里", "那么",
+        "接下来", "总结一下", "总结：", "分析：", "推理：",
     )
     out = []
     for line in lines:
@@ -337,7 +348,7 @@ def _get_reply_from_events(events):
             parts.append(text)
     reply = _strip_thinking("".join(parts).strip()) or None
     if reply and len(reply) > MAX_REPLY_LENGTH:
-        reply = reply[:MAX_REPLY_LENGTH].rstrip() + "..."
+        reply = reply[:MAX_REPLY_LENGTH - 1].rstrip() + "…"
     return reply
 
 
@@ -1018,13 +1029,13 @@ async def create_conversation(req: CreateConversationReq):
             duplicates.append(pid)
         seen.add(pid)
     if duplicates:
-        # * ID *
+        # 检测重复 persona ID
         from collections import Counter
         counts = Counter(persona_ids)
-        dup_details = ", ".join(f"{pid} * {counts[pid]} *" for pid in set(duplicates))
+        dup_details = ", ".join(f"{pid} 出现了 {counts[pid]} 次" for pid in set(duplicates))
         raise HTTPException(
             400,
-            detail=f"*: {dup_details}",
+            detail=f"检测到重复的聊天对象: {dup_details}",
         )
 
     # * persona *
